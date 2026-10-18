@@ -9,6 +9,7 @@
 #pragma once
 
 #include "deskflow/PlatformComputer.h"
+#include "deskflow/ShapeHole.h"
 #include "platform/MSWindowsHook.h"
 #include "platform/MSWindowsPowerManager.h"
 
@@ -91,6 +92,7 @@ public:
   int32_t getJumpZoneSize() const override;
   bool isAnyMouseButtonDown(uint32_t &buttonID) const override;
   void getCursorCenter(int32_t &x, int32_t &y) const override;
+  std::vector<deskflow::ShapeHole> getShapeHoles() const override;
 
   // ISecondaryComputer overrides
   void fakeMouseButton(ButtonID id, bool press) override;
@@ -272,6 +274,11 @@ private:
 
   // true if system appears to have multiple monitors
   bool m_multimon = false;
+
+  // each monitor's rect, and the gaps they leave in the virtual desktop
+  // (e.g. the missing corner of an L-shaped arrangement)
+  std::vector<deskflow::Rect> m_monitors;
+  std::vector<deskflow::ShapeHole> m_shapeHoles;
 
   // last mouse position
   int32_t m_xCursor = 0;

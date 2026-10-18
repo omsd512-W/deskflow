@@ -289,7 +289,7 @@ A hole-location link differs from a directional link in a few ways:
 
 * It has no range: the hole's exact position, size and which side(s) of it border real monitors are all worked out from the server's actual monitor layout at runtime, not configured by hand.
 * The return link, from the other computer back onto the server, is added automatically; you only need to write the one line above, not both directions.
-* It only has an effect on a server platform that can report an irregular monitor layout to deskflow (currently Linux/Wayland). On other platforms, or if the named hole isn't actually present in the server's layout, the entry is accepted but logged as unused and has no effect.
+* It only has an effect on a server platform that can report an irregular monitor layout to deskflow (currently Linux/Wayland and Windows). On other platforms, or if the named hole isn't actually present in the server's layout, the entry is accepted but logged as unused and has no effect.
 * Hole-location links are only meaningful on the server's own section, since only the server's own screen shape can have a hole; one written under any other computer's section is silently ignored.
 * If the server's monitor layout changes after startup (a monitor is added, removed or moved), the hole (probably) will not be detected so a restart is needed. This seems to be a limitation in some systems e.g. KWin. 
 

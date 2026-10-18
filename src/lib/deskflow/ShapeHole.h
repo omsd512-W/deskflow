@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace deskflow {
@@ -81,5 +82,16 @@ skipped -- that shape isn't supported, so edge-jumping simply won't trigger
 there.
 */
 std::vector<ShapeHole> findShapeHoles(const std::vector<Rect> &regions, const Rect &bounds);
+
+//! Clamp a point onto the nearest of a set of rectangles
+/*!
+Returns \c x and \c y unchanged if they already fall inside one of
+\c regions (or if there are no regions); otherwise returns the closest point
+inside the closest region.  Used to pull a cursor position that a platform
+reported inside a shape hole back onto the monitor edge it was pushed
+against.
+*/
+std::pair<std::int64_t, std::int64_t>
+clampToRegions(const std::vector<Rect> &regions, std::int64_t x, std::int64_t y);
 
 } // namespace deskflow

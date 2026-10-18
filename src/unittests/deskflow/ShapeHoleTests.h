@@ -26,4 +26,7 @@ private Q_SLOTS:
   void activeDirections_matchesEachLocation();
   void parseHoleLocation_roundTrips();
   void parseHoleLocation_unknownName_returnsNullopt();
+  void clampToRegions_pointOnMonitor_unchanged();
+  void clampToRegions_pointInTopLeftHole_clampedToNearestInnerEdge();
+  void clampToRegions_noRegions_unchanged();
 };

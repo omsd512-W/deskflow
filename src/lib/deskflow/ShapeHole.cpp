@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <queue>
 #include <utility>
 
@@ -191,6 +192,30 @@ std::vector<ShapeHole> findShapeHoles(const std::vector<Rect> &regions, const Re
   }
 
   return holes;
+}
+
+std::pair<std::int64_t, std::int64_t>
+clampToRegions(const std::vector<Rect> &regions, std::int64_t x, std::int64_t y)
+{
+  if (regions.empty() || isCovered(regions, x, y)) {
+    return {x, y};
+  }
+
+  auto best = std::make_pair(x, y);
+  auto bestDistance = std::numeric_limits<std::int64_t>::max();
+  for (const auto &r : regions) {
+    if (r.w <= 0 || r.h <= 0) {
+      continue;
+    }
+    const auto cx = std::clamp(x, r.x, r.x + r.w - 1);
+    const auto cy = std::clamp(y, r.y, r.y + r.h - 1);
+    const auto distance = (cx - x) * (cx - x) + (cy - y) * (cy - y);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = {cx, cy};
+    }
+  }
+  return best;
 }
 
 } // namespace deskflow

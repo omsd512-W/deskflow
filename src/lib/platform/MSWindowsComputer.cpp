@@ -689,6 +689,11 @@ void MSWindowsComputer::getCursorCenter(int32_t &x, int32_t &y) const
   y = m_yCenter;
 }
 
+std::vector<deskflow::ShapeHole> MSWindowsComputer::getShapeHoles() const
+{
+  return m_shapeHoles;
+}
+
 void MSWindowsComputer::fakeMouseButton(ButtonID id, bool press)
 {
   m_desks->fakeMouseButton(id, press);
@@ -1227,6 +1232,17 @@ bool MSWindowsComputer::onMouseButton(WPARAM wParam, LPARAM lParam)
 //   example)
 bool MSWindowsComputer::onMouseMove(int32_t mx, int32_t my)
 {
+  // the low level hook can report a position the cursor never actually
+  // reaches, e.g. inside a gap between monitors when pushing against an inner
+  // edge of an L-shaped arrangement (the hook itself only clamps onto the
+  // bounding box).  pull it back onto the nearest monitor so the server sees
+  // the cursor at the edge it was pushed against.
+  if (m_isPrimary && m_isOnComputer && !m_shapeHoles.empty()) {
+    const auto [cx, cy] = deskflow::clampToRegions(m_monitors, mx, my);
+    mx = static_cast<int32_t>(cx);
+    my = static_cast<int32_t>(cy);
+  }
+
   // compute motion delta (relative to the last known
   // mouse position)
   int32_t x = mx - m_xCursor;
@@ -1317,12 +1333,14 @@ bool MSWindowsComputer::onDisplayChange()
 {
   // computer resolution may have changed.  save old shape.
   int32_t xOld = m_x, yOld = m_y, wOld = m_w, hOld = m_h;
+  const auto shapeHolesOld = m_shapeHoles;
 
   // update shape
   updateComputerShape();
 
-  // do nothing if resolution hasn't changed
-  if (xOld != m_x || yOld != m_y || wOld != m_w || hOld != m_h) {
+  // do nothing if neither the resolution nor the monitor arrangement changed
+  // (monitors can move around inside the same bounding box)
+  if (xOld != m_x || yOld != m_y || wOld != m_w || hOld != m_h || shapeHolesOld != m_shapeHoles) {
     if (m_isPrimary) {
       if (!m_isOnComputer) {
         LOG_VERBOSE("centering cursor on display change: %+d, %+d", m_xCenter, m_yCenter);
@@ -1440,6 +1458,41 @@ void MSWindowsComputer::updateComputerShape()
 
   // check for multiple monitors
   m_multimon = (m_w != GetSystemMetrics(SM_CXSCREEN) || m_h != GetSystemMetrics(SM_CYSCREEN));
+
+  // find any gaps the monitors leave in the virtual desktop, e.g. the
+  // missing corner of an L-shaped arrangement, so a client can fill them
+  std::vector<deskflow::Rect> monitors;
+  EnumDisplayMonitors(
+      nullptr, nullptr,
+      [](HMONITOR, HDC, LPRECT rect, LPARAM data) -> BOOL {
+        auto *list = reinterpret_cast<std::vector<deskflow::Rect> *>(data);
+        list->push_back({rect->left, rect->top, rect->right - rect->left, rect->bottom - rect->top});
+        return TRUE;
+      },
+      reinterpret_cast<LPARAM>(&monitors)
+  );
+  for (const auto &monitor : monitors) {
+    LOG_DEBUG(
+        "monitor: %dx%d@%d,%d", static_cast<int32_t>(monitor.w), static_cast<int32_t>(monitor.h),
+        static_cast<int32_t>(monitor.x), static_cast<int32_t>(monitor.y)
+    );
+  }
+
+  const auto shapeHoles = deskflow::findShapeHoles(monitors, {m_x, m_y, m_w, m_h});
+  if (shapeHoles != m_shapeHoles) {
+    if (shapeHoles.empty()) {
+      LOG_INFO("monitor layout has no shape holes (it's a plain rectangle)");
+    } else {
+      for (const auto &hole : shapeHoles) {
+        LOG_INFO(
+            "monitor layout has a %s hole: %dx%d@%d,%d", hole.location.c_str(), static_cast<int32_t>(hole.rect.w),
+            static_cast<int32_t>(hole.rect.h), static_cast<int32_t>(hole.rect.x), static_cast<int32_t>(hole.rect.y)
+        );
+      }
+    }
+  }
+  m_monitors = std::move(monitors);
+  m_shapeHoles = shapeHoles;
 
   // tell the desks
   m_desks->setShape(m_x, m_y, m_w, m_h, m_xCenter, m_yCenter, m_multimon);

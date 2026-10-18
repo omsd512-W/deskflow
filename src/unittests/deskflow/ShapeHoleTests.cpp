@@ -226,4 +226,40 @@ void ShapeHoleTests::parseHoleLocation_unknownName_returnsNullopt()
   QVERIFY(!deskflow::parseHoleLocation("Bottom-Left").has_value()); // case-sensitive
 }
 
+namespace {
+// an L with the top-left missing
+const std::vector<Rect> kTopLeftMissing{
+    {1920, 0, 1920, 1080},    // top-right
+    {0, 1080, 1920, 1080},    // bottom-left
+    {1920, 1080, 1920, 1080}, // bottom-right
+};
+} // namespace
+
+void ShapeHoleTests::clampToRegions_pointOnMonitor_unchanged()
+{
+  const auto [x, y] = deskflow::clampToRegions(kTopLeftMissing, 2000, 500);
+  QCOMPARE(x, 2000);
+  QCOMPARE(y, 500);
+}
+
+void ShapeHoleTests::clampToRegions_pointInTopLeftHole_clampedToNearestInnerEdge()
+{
+  // pushed left past the top-right monitor's left edge
+  const auto [lx, ly] = deskflow::clampToRegions(kTopLeftMissing, 1900, 300);
+  QCOMPARE(lx, 1920);
+  QCOMPARE(ly, 300);
+
+  // pushed up past the bottom-left monitor's top edge
+  const auto [ux, uy] = deskflow::clampToRegions(kTopLeftMissing, 500, 1060);
+  QCOMPARE(ux, 500);
+  QCOMPARE(uy, 1080);
+}
+
+void ShapeHoleTests::clampToRegions_noRegions_unchanged()
+{
+  const auto [x, y] = deskflow::clampToRegions({}, -5, 7);
+  QCOMPARE(x, -5);
+  QCOMPARE(y, 7);
+}
+
 QTEST_MAIN(ShapeHoleTests)
