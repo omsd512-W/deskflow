@@ -12,41 +12,141 @@
 
 #include <QtEndian>
 
+#include <bit>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 
 namespace {
-bool normaliseMalformedMacDib(const std::string &data, std::string &normalisedData)
+constexpr uint32_t kRedMask = 0x00ff0000;
+constexpr uint32_t kGreenMask = 0x0000ff00;
+constexpr uint32_t kBlueMask = 0x000000ff;
+constexpr uint32_t kAlphaMask = 0xff000000;
+
+uint8_t channel(uint32_t pixel, uint32_t mask)
 {
-  if (data.size() < sizeof(BITMAPINFOHEADER)) {
+  if (mask == 0) {
+    return 0;
+  }
+  const auto shift = std::countr_zero(mask);
+  const uint64_t max = mask >> shift;
+  return static_cast<uint8_t>(static_cast<uint64_t>((pixel & mask) >> shift) * 255 / max);
+}
+
+// Most Windows applications only decode a CF_DIB that has a BITMAPINFOHEADER,
+// bottom-up rows and BI_RGB pixels. macOS sends a V5 header, top-down rows and
+// BI_BITFIELDS, so rewrite anything else into that form (32 bit, with alpha).
+bool normaliseDib(const std::string &data, std::string &normalisedData)
+{
+  BITMAPINFOHEADER header;
+  if (data.size() < sizeof(header)) {
+    return false;
+  }
+  memcpy(&header, data.data(), sizeof(header));
+  if (header.biSize < sizeof(header) || header.biWidth <= 0 || header.biHeight == 0 || header.biPlanes != 1 ||
+      (header.biBitCount != 24 && header.biBitCount != 32) ||
+      (header.biCompression != BI_RGB && header.biCompression != BI_BITFIELDS)) {
+    return false;
+  }
+  if (header.biSize == sizeof(header) && header.biHeight > 0 && header.biCompression == BI_RGB) {
+    // already in canonical form
     return false;
   }
 
-  const auto *header = reinterpret_cast<const BITMAPINFOHEADER *>(data.data());
-  if (header->biWidth <= 0) {
+  const auto width = static_cast<size_t>(header.biWidth);
+  const auto height = static_cast<size_t>(std::abs(static_cast<int64_t>(header.biHeight)));
+  const auto bytesPerPixel = static_cast<size_t>(header.biBitCount / 8);
+  const auto stride = (width * header.biBitCount + 31) / 32 * 4;
+  if (height > std::numeric_limits<size_t>::max() / stride / 2) {
     return false;
   }
 
-  const auto width = static_cast<size_t>(header->biWidth);
-  const auto height = static_cast<size_t>(std::abs(static_cast<int64_t>(header->biHeight)));
-  if (height == 0 || width > (std::numeric_limits<size_t>::max() - sizeof(BITMAPINFOHEADER)) / 4 / height) {
+  uint32_t masks[] = {kRedMask, kGreenMask, kBlueMask, 0};
+  size_t offset = header.biSize;
+  if (header.biBitCount == 32 && header.biSize > sizeof(header) && data.size() == sizeof(header) + stride * height) {
+    // macOS can describe an INFOHEADER-sized 32-bit pixel payload as a V5 DIB.
+    // Windows then interprets the first pixels as V5 colour masks. The pixel
+    // bytes are ordinary BGRA.
+    offset = sizeof(header);
+    masks[3] = kAlphaMask;
+  } else {
+    if (header.biSize > data.size()) {
+      return false;
+    }
+
+    // colour masks follow an INFOHEADER, and are in the same place inside the
+    // bigger headers, which also have an alpha mask
+    if (header.biCompression == BI_BITFIELDS) {
+      if (data.size() < sizeof(header) + 3 * sizeof(DWORD)) {
+        return false;
+      }
+      for (size_t i = 0; i < 3; ++i) {
+        masks[i] = qFromLittleEndian<quint32>(data.data() + sizeof(header) + i * sizeof(DWORD));
+      }
+      if (header.biSize == sizeof(header)) {
+        offset += 3 * sizeof(DWORD);
+      }
+    }
+    if (header.biBitCount == 32 && header.biSize >= sizeof(header) + 4 * sizeof(DWORD)) {
+      masks[3] = qFromLittleEndian<quint32>(data.data() + sizeof(header) + 3 * sizeof(DWORD));
+    }
+    offset += static_cast<size_t>(header.biClrUsed) * sizeof(RGBQUAD);
+  }
+  if (offset > data.size() || stride * height > data.size() - offset) {
     return false;
   }
-  const auto expectedSize = sizeof(BITMAPINFOHEADER) + width * height * 4;
 
-  // macOS can describe an INFOHEADER-sized 32-bit pixel payload as a V5 DIB.
-  // Windows then interprets the first pixels as V5 colour masks. The pixel
-  // bytes are ordinary BGRA, so publish a canonical BI_RGB DIB instead.
-  if (header->biSize <= sizeof(BITMAPINFOHEADER) || header->biPlanes != 1 || header->biBitCount != 32 ||
-      header->biCompression != BI_BITFIELDS || expectedSize != data.size()) {
-    return false;
+  BITMAPINFOHEADER normalisedHeader = header;
+  normalisedHeader.biSize = sizeof(normalisedHeader);
+  normalisedHeader.biHeight = static_cast<LONG>(height);
+  normalisedHeader.biBitCount = 32;
+  normalisedHeader.biCompression = BI_RGB;
+  normalisedHeader.biSizeImage = static_cast<DWORD>(width * height * 4);
+  normalisedHeader.biClrUsed = 0;
+  normalisedHeader.biClrImportant = 0;
+  normalisedData.assign(reinterpret_cast<const char *>(&normalisedHeader), sizeof(normalisedHeader));
+  normalisedData.resize(sizeof(normalisedHeader) + width * height * 4);
+  auto *pixels = reinterpret_cast<uint8_t *>(&normalisedData[sizeof(normalisedHeader)]);
+
+  const bool bgra = header.biBitCount == 32 && masks[0] == kRedMask && masks[1] == kGreenMask &&
+                    masks[2] == kBlueMask && (masks[3] == kAlphaMask || masks[3] == 0);
+  for (size_t row = 0; row < height; ++row) {
+    const auto *src = reinterpret_cast<const uint8_t *>(data.data()) + offset +
+                      (header.biHeight < 0 ? height - 1 - row : row) * stride;
+    auto *dst = pixels + row * width * 4;
+    if (bgra) {
+      memcpy(dst, src, width * 4);
+      continue;
+    }
+    for (size_t x = 0; x < width; ++x, src += bytesPerPixel, dst += 4) {
+      uint32_t pixel = src[0] | (src[1] << 8) | (src[2] << 16);
+      if (bytesPerPixel == 4) {
+        pixel |= static_cast<uint32_t>(src[3]) << 24;
+      }
+      dst[0] = channel(pixel, masks[2]);
+      dst[1] = channel(pixel, masks[1]);
+      dst[2] = channel(pixel, masks[0]);
+      dst[3] = channel(pixel, masks[3]);
+    }
   }
 
-  normalisedData = data.substr(0, sizeof(BITMAPINFOHEADER));
-  qToLittleEndian<quint32>(sizeof(BITMAPINFOHEADER), reinterpret_cast<quint8 *>(&normalisedData[0]));
-  qToLittleEndian<quint32>(BI_RGB, reinterpret_cast<quint8 *>(&normalisedData[0]) + 16);
-  normalisedData += data.substr(sizeof(BITMAPINFOHEADER));
-  LOG_INFO("normalised malformed macOS clipboard image to BI_RGB");
+  // without any alpha the image would be fully transparent, so make it opaque
+  const auto end = pixels + width * height * 4;
+  bool hasAlpha = false;
+  for (auto *alpha = pixels + 3; masks[3] != 0 && alpha < end && !hasAlpha; alpha += 4) {
+    hasAlpha = *alpha != 0;
+  }
+  if (!hasAlpha) {
+    for (auto *alpha = pixels + 3; alpha < end; alpha += 4) {
+      *alpha = 0xff;
+    }
+  }
+
+  LOG_INFO(
+      "normalised clipboard image %zux%zu from header=%u depth=%d comp=%u%s", width, height,
+      static_cast<unsigned>(header.biSize), header.biBitCount, static_cast<unsigned>(header.biCompression),
+      header.biHeight < 0 ? " top-down" : ""
+  );
   return true;
 }
 } // namespace
@@ -70,7 +170,7 @@ MSWindowsClipboardBitmapConverter::fromIClipboard(const std::string &data) const
 {
   std::string normalisedData;
   const auto *clipboardData = &data;
-  if (normaliseMalformedMacDib(data, normalisedData)) {
+  if (normaliseDib(data, normalisedData)) {
     clipboardData = &normalisedData;
   }
 
