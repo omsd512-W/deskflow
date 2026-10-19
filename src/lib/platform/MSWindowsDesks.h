@@ -87,6 +87,12 @@ public:
   */
   void leave(HKL keyLayout);
 
+  //! Wait for the cursor to be hidden
+  /*!
+  Waits briefly, after leave(), until the cursor is no longer drawn.
+  */
+  void waitForHiddenCursor() const;
+
   //! Notify of options changes
   /*!
   Resets all options to their default values.
@@ -185,6 +191,8 @@ private:
     DWORD m_targetID;
     HDESK m_desk;
     HWND m_window;
+    // hides the cursor where it leaves the primary, until it's warped to m_window
+    HWND m_edgeWindow = nullptr;
     HWND m_foregroundWindow;
     bool m_lowLevel;
     bool m_hasRelativeRestorePosition = false;

@@ -286,10 +286,22 @@ void MSWindowsComputer::leave()
   // tell the key mapper about the keyboard layout
   m_keyState->setKeyLayout(m_keyLayout);
 
+  if (m_isPrimary) {
+    // keep the cursor still until the warp below. motion passed on in between
+    // moves it off the windows hiding it, where it shows until the next
+    // motion warps it back, a few frames later if the switch is busy with
+    // the clipboard. keys still pass until relaying starts below.
+    m_hook.setMode(kHOOK_HOLD_CURSOR);
+  }
+
   // tell desk that we're leaving and tell it the keyboard layout
   m_desks->leave(m_keyLayout);
 
   if (m_isPrimary) {
+    // let it vanish at the edge it left by. warped first, it's drawn in the
+    // center until the hider window there takes it over.
+    m_desks->waitForHiddenCursor();
+
     LOG_VERBOSE("centering cursor on leave: %+d, %+d", m_xCenter, m_yCenter);
     warpCursor(m_xCenter, m_yCenter);
 

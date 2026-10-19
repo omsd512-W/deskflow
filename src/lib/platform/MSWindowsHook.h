@@ -39,7 +39,8 @@ enum EHookMode
 {
   kHOOK_DISABLE,
   kHOOK_WATCH_JUMP_ZONE,
-  kHOOK_RELAY_EVENTS
+  kHOOK_RELAY_EVENTS,
+  kHOOK_HOLD_CURSOR // eat mouse motion only, while leaving the computer
 };
 
 //! Loads and provides functions for the Windows hook
