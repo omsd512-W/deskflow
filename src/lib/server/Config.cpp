@@ -46,11 +46,16 @@ Direction toDirection(deskflow::layout::Side side)
 
 void connectByGeometry(Config &config, const QStringList &computers)
 {
-  QMap<QString, QRect> placed;
+  // A computer laid out by its monitors (the server) links on each monitor's edges, so a neighbour can sit
+  // against an inner edge of an L-shaped arrangement.
+  QMap<QString, QList<QRect>> placed;
   for (const auto &computer : computers) {
     const auto geometry = Settings::value(Settings::Computer::Geometry.arg(computer)).toRect();
-    if (!computer.isEmpty() && geometry.isValid())
-      placed.insert(computer, geometry);
+    if (computer.isEmpty() || !geometry.isValid())
+      continue;
+    const auto monitors =
+        deskflow::layout::rectsFromVariant(Settings::value(Settings::Computer::Monitors.arg(computer)));
+    placed.insert(computer, deskflow::layout::placedRects(geometry, monitors));
   }
 
   for (const auto &link : deskflow::layout::computeLinks(placed)) {

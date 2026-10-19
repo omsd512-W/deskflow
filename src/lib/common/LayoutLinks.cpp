@@ -182,6 +182,35 @@ bool overlapsAny(const QList<QRect> &rects, const QList<QRect> &others)
   return std::ranges::any_of(rects, [&others](const QRect &rect) { return overlapsAny(rect, others); });
 }
 
+QList<QRect> placedRects(const QRect &geometry, const QList<QRect> &monitors)
+{
+  if (monitors.isEmpty())
+    return {geometry};
+
+  QList<QRect> result;
+  for (const auto &monitor : monitors)
+    result.append(monitor.translated(geometry.topLeft()));
+  return result;
+}
+
+QList<QRect> rectsFromVariant(const QVariant &value)
+{
+  QList<QRect> result;
+  for (const auto &item : value.toList()) {
+    if (const auto rect = item.toRect(); rect.isValid())
+      result.append(rect);
+  }
+  return result;
+}
+
+QVariant rectsToVariant(const QList<QRect> &rects)
+{
+  QVariantList result;
+  for (const auto &rect : rects)
+    result.append(rect);
+  return result;
+}
+
 QRect snap(const QRect &moving, const QList<QRect> &others, int threshold)
 {
   int bestDistance = threshold + 1;

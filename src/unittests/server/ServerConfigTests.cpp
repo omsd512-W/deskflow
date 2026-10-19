@@ -8,6 +8,7 @@
 
 #include "ServerConfigTests.h"
 
+#include "common/LayoutLinks.h"
 #include "common/Settings.h"
 #include "server/Config.h"
 
@@ -270,6 +271,36 @@ void ServerConfigTests::read_touchingGeometry_linked()
 
   QCOMPARE(config.getNeighbor("a", Direction::Right, 0.75f, nullptr), "b");
   QCOMPARE(config.getNeighbor("a", Direction::Right, 0.25f, nullptr), "");
+}
+
+void ServerConfigTests::read_serverMonitors_linkedOnInnerEdges()
+{
+  // Server monitors in an L leaving the top left corner empty, relative to the server's top left
+  // (2548,-1080 and so on in the desktop), with the client tucked into that corner.
+  Settings::setValue(Settings::Server::ExternalConfig, false);
+  placeComputer("lserver", QRect(0, 0, 5120, 2520));
+  Settings::setValue(
+      Settings::Computer::Monitors.arg("lserver"),
+      deskflow::layout::rectsToVariant({QRect(0, 1080, 2560, 1440), QRect(2560, 1080, 2560, 1080), QRect(2548, 0, 1920, 1080)})
+  );
+  placeComputer("lclient", QRect(-12, -360, 2560, 1440));
+  Config config(nullptr);
+  std::istringstream empty;
+
+  empty >> config;
+
+  // the top monitor's left edge spans the top 1080 of the server's 2520 pixels
+  QCOMPARE(config.getNeighbor("lserver", Direction::Left, 0.2f, nullptr), "lclient");
+  QCOMPARE(config.getNeighbor("lserver", Direction::Left, 0.6f, nullptr), "");
+  // the bottom left monitor's top edge spans the left 2548 of the server's 5120 pixels
+  QCOMPARE(config.getNeighbor("lserver", Direction::Top, 0.25f, nullptr), "lclient");
+  QCOMPARE(config.getNeighbor("lserver", Direction::Top, 0.75f, nullptr), "");
+  // and back: the bottom 3/4 of the client's right edge faces the top monitor
+  float position = 0;
+  QCOMPARE(config.getNeighbor("lclient", Direction::Right, 0.2f, &position), "");
+  QCOMPARE(config.getNeighbor("lclient", Direction::Right, 0.5f, &position), "lserver");
+  // halfway down the client is 360 pixels below its top at -360, so the cursor enters the server at 360
+  QCOMPARE(qRound(position * 2520), 360);
 }
 
 void ServerConfigTests::read_externalConfig_geometryIgnored()

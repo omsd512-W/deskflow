@@ -26,6 +26,7 @@ private Q_SLOTS:
   void equalityCheck_diff_holeLinks();
   void restartServerOnZoneChange_defaultsFalse();
   void read_touchingGeometry_linked();
+  void read_serverMonitors_linkedOnInnerEdges();
   void read_externalConfig_geometryIgnored();
 
 private:

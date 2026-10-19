@@ -11,6 +11,7 @@
 #include <QObject>
 #include <QRect>
 #include <QString>
+#include <QVariant>
 
 namespace deskflow::layout {
 Q_NAMESPACE
@@ -67,6 +68,18 @@ QRect boundingRect(const QList<QRect> &rects);
  * rects. Offsets that would overlap @p others are skipped. Null when nothing fits within @p threshold.
  */
 QPoint snapGroup(const QList<QRect> &moving, const QList<QRect> &others, int threshold);
+
+/**
+ * @brief The rects a computer takes up in the layout: each of @p monitors (relative to the top left of
+ * @p geometry) moved to where the computer sits, or @p geometry itself when there are no monitors.
+ */
+QList<QRect> placedRects(const QRect &geometry, const QList<QRect> &monitors);
+
+/**
+ * @brief Converts the list of rects stored in the settings, e.g. `computer_<name>/monitors`.
+ */
+QList<QRect> rectsFromVariant(const QVariant &value);
+QVariant rectsToVariant(const QList<QRect> &rects);
 
 /**
  * @brief Moves @p moving flush against the nearest edge of @p others within @p threshold,
