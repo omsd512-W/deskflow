@@ -271,6 +271,9 @@ private:
   int32_t m_h = 0;
   int32_t m_xCenter = 0;
   int32_t m_yCenter = 0;
+  // size of the primary monitor, at 0,0, whose center the cursor is parked at
+  int32_t m_wPrimary = 0;
+  int32_t m_hPrimary = 0;
 
   // true if system appears to have multiple monitors
   bool m_multimon = false;

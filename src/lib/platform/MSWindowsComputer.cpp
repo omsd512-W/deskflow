@@ -1274,10 +1274,14 @@ bool MSWindowsComputer::onMouseMove(int32_t mx, int32_t my)
     // from the center of the computer to an edge then
     // it's probably a bogus motion that we want to
     // ignore (see warpCursorNoFlush() for a further
-    // description).
+    // description).  the cursor is parked at the center of the primary
+    // monitor, which sits at 0,0, so measure against that monitor rather
+    // than the whole desktop: when the primary monitor isn't centered in the
+    // desktop (e.g. an L-shaped arrangement), a stale position reported just
+    // after leaving can be far from the center yet still inside the desktop.
     static int32_t bogusZoneSize = 10;
-    if (-x + bogusZoneSize > m_xCenter - m_x || x + bogusZoneSize > m_x + m_w - m_xCenter ||
-        -y + bogusZoneSize > m_yCenter - m_y || y + bogusZoneSize > m_y + m_h - m_yCenter) {
+    if (-x + bogusZoneSize > m_xCenter || x + bogusZoneSize > m_wPrimary - m_xCenter ||
+        -y + bogusZoneSize > m_yCenter || y + bogusZoneSize > m_hPrimary - m_yCenter) {
 
       LOG_DEBUG("dropped bogus delta motion: %+d,%+d", x, y);
     } else {
@@ -1453,8 +1457,10 @@ void MSWindowsComputer::updateComputerShape()
   m_h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
   m_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
   m_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
-  m_xCenter = GetSystemMetrics(SM_CXSCREEN) >> 1;
-  m_yCenter = GetSystemMetrics(SM_CYSCREEN) >> 1;
+  m_wPrimary = GetSystemMetrics(SM_CXSCREEN);
+  m_hPrimary = GetSystemMetrics(SM_CYSCREEN);
+  m_xCenter = m_wPrimary >> 1;
+  m_yCenter = m_hPrimary >> 1;
 
   // check for multiple monitors
   m_multimon = (m_w != GetSystemMetrics(SM_CXSCREEN) || m_h != GetSystemMetrics(SM_CYSCREEN));
