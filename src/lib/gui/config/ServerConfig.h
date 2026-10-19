@@ -61,6 +61,12 @@ public:
    */
   void ensureServer();
 
+  /**
+   * @brief setServerMonitors lays the server out by its monitors, given in desktop pixels, so neighbours can
+   * be placed against each monitor's edges; adds the server to the layout if missing
+   */
+  void setServerMonitors(const QList<QRect> &monitors);
+
 private:
   void recall();
   QSettingsProxy &settings();

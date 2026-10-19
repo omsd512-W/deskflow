@@ -204,11 +204,19 @@ void ServerConfig::ensureServer()
   server.markAsServer();
   const QRect origin(QPoint(), ComputerList::kDefaultSize);
   server.setGeometry(
-      deskflow::layout::overlapsAny(origin, m_computers.rects().values())
+      deskflow::layout::overlapsAny(origin, m_computers.layoutRects())
           ? m_computers.freeSpotNextTo(origin, origin.size())
           : origin
   );
   m_computers.append(server);
+}
+
+void ServerConfig::setServerMonitors(const QList<QRect> &monitors)
+{
+  ensureServer();
+  int index = -1;
+  if (!monitors.isEmpty() && findComputerName(getServerName(), index))
+    m_computers[index].setMonitors(monitors);
 }
 
 void ServerConfig::setConfigFile(const QString &configFile) const

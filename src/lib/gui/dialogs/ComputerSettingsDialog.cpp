@@ -9,11 +9,16 @@
 #include "ui_ComputerSettingsDialog.h"
 
 #include "gui/config/Computer.h"
+#include "gui/config/ComputerList.h"
 #include "validators/AliasValidator.h"
 #include "validators/ComputerLineNameValidator.h"
 #include "validators/ValidationError.h"
 
+#include <QBoxLayout>
+#include <QGroupBox>
+#include <QLabel>
 #include <QMessageBox>
+#include <QSpinBox>
 
 #include <common/Settings.h>
 
@@ -63,6 +68,31 @@ ComputerSettingsDialog::ComputerSettingsDialog(QWidget *parent, Computer *comput
   ui->chkFixNumLock->setChecked(m_computer->fix(NumLock));
   ui->chkFixScrollLock->setChecked(m_computer->fix(ScrollLock));
   ui->chkFixXTest->setChecked(m_computer->fix(XTest));
+
+  // The size in pixels lines a client up with the server's monitors in the layout. A computer laid out by its
+  // monitors takes its size from them.
+  if (m_computer->monitors().isEmpty()) {
+    auto *group = new QGroupBox(tr("Size in layout"), this);
+    auto *row = new QHBoxLayout(group);
+    m_width = new QSpinBox(group);
+    m_height = new QSpinBox(group);
+    const auto size = m_computer->geometry().isValid() ? m_computer->geometry().size() : ComputerList::kDefaultSize;
+    m_width->setRange(1, 100000);
+    m_height->setRange(1, 100000);
+    m_width->setValue(size.width());
+    m_height->setValue(size.height());
+    m_width->setSuffix(tr(" px"));
+    m_height->setSuffix(tr(" px"));
+    m_width->setToolTip(tr("Use the computer's screen resolution to line it up pixel for pixel"));
+    m_height->setToolTip(m_width->toolTip());
+    row->addWidget(new QLabel(tr("Width"), group));
+    row->addWidget(m_width);
+    row->addWidget(new QLabel(tr("Height"), group));
+    row->addWidget(m_height);
+    row->addStretch();
+    if (auto *mainLayout = qobject_cast<QBoxLayout *>(layout()); mainLayout != nullptr)
+      mainLayout->insertWidget(1, group);
+  }
 
   connect(ui->buttonBox, &QDialogButtonBox::accepted, this, &ComputerSettingsDialog::accept);
   connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &ComputerSettingsDialog::reject);
@@ -123,6 +153,11 @@ void ComputerSettingsDialog::accept()
   m_computer->setFix(XTest, ui->chkFixXTest->isChecked());
 
   Settings::setValue(Settings::Computer::WeakX11Focus.arg(m_computer->name()), ui->chkWeakX11Focus->isChecked());
+
+  if (m_width != nullptr) {
+    const QSize size(m_width->value(), m_height->value());
+    m_computer->setGeometry(QRect(m_computer->geometry().isValid() ? m_computer->geometry().topLeft() : QPoint(), size));
+  }
 
   QDialog::accept();
 }

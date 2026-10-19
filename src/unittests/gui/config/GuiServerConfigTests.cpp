@@ -6,6 +6,7 @@
 
 #include "GuiServerConfigTests.h"
 
+#include "common/LayoutLinks.h"
 #include "common/Settings.h"
 #include "gui/config/ServerConfig.h"
 
@@ -107,6 +108,23 @@ void GuiServerConfigTests::recall_committedLayout_sameComputers()
   const ServerConfig reloaded;
 
   QCOMPARE(reloaded.computers(), std::as_const(config).computers());
+}
+
+void GuiServerConfigTests::setServerMonitors_lShape_clientFitsInCorner()
+{
+  ServerConfig config;
+  config.setServerMonitors({QRect(0, 0, 2560, 1440), QRect(2560, 0, 2560, 1080), QRect(2548, -1080, 1920, 1080)});
+  const auto &computers = std::as_const(config).computers();
+  const auto server = computers[0].geometry().topLeft();
+
+  // the empty top left corner of the L is free for a client, the monitors around it are not
+  const QRect inCorner(server + QPoint(0, 0), QSize(2548, 1080));
+  const QRect onMonitor(server + QPoint(0, 1080), QSize(100, 100));
+
+  QCOMPARE(computers[0].geometry().size(), QSize(5120, 2520));
+  QVERIFY(!deskflow::layout::overlapsAny(inCorner, computers.layoutRects()));
+  QVERIFY(deskflow::layout::overlapsAny(onMonitor, computers.layoutRects()));
+  QVERIFY(deskflow::layout::overlapsAny(inCorner, computers.rects().values()));
 }
 
 QTEST_MAIN(GuiServerConfigTests)

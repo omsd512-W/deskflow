@@ -20,9 +20,31 @@
 #include "gui/widgets/SettingsDialogButtonBox.h"
 
 #include <QFileDialog>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QMessageBox>
 
 using enum ComputerConfig::SwitchCorner;
+
+namespace {
+
+// The server's monitors in desktop pixels. The dialog only runs on the server, so these are the monitors the
+// core switches on. Positions are only exact when every monitor uses the same scale factor.
+QList<QRect> localMonitors()
+{
+  QList<QRect> monitors;
+  for (const auto *screen : QGuiApplication::screens()) {
+    const auto geometry = screen->geometry();
+    const auto ratio = screen->devicePixelRatio();
+    monitors.append(QRect(
+        qRound(geometry.x() * ratio), qRound(geometry.y() * ratio), qRound(geometry.width() * ratio),
+        qRound(geometry.height() * ratio)
+    ));
+  }
+  return monitors;
+}
+
+} // namespace
 
 ServerConfigDialog::ServerConfigDialog(QWidget *parent, ServerConfig &config)
     : QDialog(parent, Qt::WindowTitleHint | Qt::WindowSystemMenuHint),
@@ -404,7 +426,7 @@ void ServerConfigDialog::loadFromConfig()
   for (const Hotkey &hotkey : std::as_const(serverConfig().hotkeys()))
     ui->listHotkeys->addItem(hotkey.text());
 
-  serverConfig().ensureServer();
+  serverConfig().setServerMonitors(localMonitors());
   ui->computerLayoutView->setComputers(&serverConfig().computers());
   updateControls();
 }

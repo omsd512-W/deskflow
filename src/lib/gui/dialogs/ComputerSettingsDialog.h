@@ -9,6 +9,8 @@
 
 #include <QDialog>
 
+class QSpinBox;
+
 class QWidget;
 class QString;
 
@@ -41,4 +43,7 @@ private Q_SLOTS:
 private:
   std::unique_ptr<Ui::ComputerSettingsDialog> ui;
   Computer *m_computer;
+  // Size of the computer in the server's layout, only for computers not laid out by their monitors
+  QSpinBox *m_width = nullptr;
+  QSpinBox *m_height = nullptr;
 };

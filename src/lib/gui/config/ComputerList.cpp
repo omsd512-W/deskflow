@@ -24,9 +24,19 @@ QMap<QString, QRect> ComputerList::rects(const QString &except) const
   return result;
 }
 
+QList<QRect> ComputerList::layoutRects(const QString &except) const
+{
+  QList<QRect> result;
+  for (const auto &computer : *this) {
+    if (computer.name() != except && !computer.isNull() && computer.geometry().isValid())
+      result.append(computer.layoutRects());
+  }
+  return result;
+}
+
 QRect ComputerList::freeSpotNextTo(const QRect &anchor, const QSize &size) const
 {
-  const auto others = rects().values();
+  const auto others = layoutRects();
   const QList<QRect> candidates = {
       QRect(QPoint(anchor.x() - size.width(), anchor.y()), size),
       QRect(QPoint(anchor.x() + anchor.width(), anchor.y()), size),

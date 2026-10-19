@@ -32,13 +32,15 @@ class Computer : public ComputerConfig
   friend QDataStream &operator<<(QDataStream &outStream, const Computer &computer)
   {
     return outStream << computer.name() << computer.switchCornerSize() << computer.aliases() << computer.modifiers()
-                     << computer.switchCorners() << computer.fixes() << computer.isServer() << computer.geometry();
+                     << computer.switchCorners() << computer.fixes() << computer.isServer() << computer.geometry()
+                     << computer.monitors();
   }
 
   friend QDataStream &operator>>(QDataStream &inStream, Computer &computer)
   {
     return inStream >> computer.m_Name >> computer.m_SwitchCornerSize >> computer.m_Aliases >> computer.m_Modifiers >>
-           computer.m_SwitchCorners >> computer.m_Fixes >> computer.m_isServer >> computer.m_geometry;
+           computer.m_SwitchCorners >> computer.m_Fixes >> computer.m_isServer >> computer.m_geometry >>
+           computer.m_monitors;
   }
 
 public:
@@ -97,6 +99,18 @@ public:
   {
     return m_geometry;
   }
+  /**
+   * @brief Each monitor's rect relative to the top left of geometry(), in pixels.
+   * Empty when the computer is laid out as a single rect, which is the case for clients.
+   */
+  [[nodiscard]] const QList<QRect> &monitors() const
+  {
+    return m_monitors;
+  }
+  /**
+   * @brief The rects the computer takes up in the layout: its monitors where it sits, or its geometry.
+   */
+  [[nodiscard]] QList<QRect> layoutRects() const;
 
   void loadSettings(QSettingsProxy &settings);
   void saveSettings(QSettingsProxy &settings) const;
@@ -115,6 +129,11 @@ public:
   {
     m_geometry = geometry;
   }
+  /**
+   * @brief Lays the computer out by @p monitors, given in desktop coordinates. They're stored relative to
+   * their bounding rect, which becomes the size of geometry(), keeping its position.
+   */
+  void setMonitors(const QList<QRect> &monitors);
   [[nodiscard]] bool isServer() const
   {
     return m_isServer;
@@ -179,4 +198,5 @@ private:
   bool m_Swapped = false;
   bool m_isServer = false;
   QRect m_geometry = {};
+  QList<QRect> m_monitors = {};
 };

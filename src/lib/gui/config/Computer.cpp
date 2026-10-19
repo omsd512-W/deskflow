@@ -9,6 +9,7 @@
 
 #include "Computer.h"
 #include "config/ComputerConfig.h"
+#include <common/LayoutLinks.h>
 #include <common/Settings.h>
 
 using enum KeyboardModifier;
@@ -29,6 +30,7 @@ void Computer::loadSettings(QSettingsProxy &settings)
     return;
 
   setGeometry(Settings::value(Settings::Computer::Geometry.arg(name)).toRect());
+  m_monitors = deskflow::layout::rectsFromVariant(Settings::value(Settings::Computer::Monitors.arg(name)));
   setModifier(Alt, modifierValueFromString(Settings::value(Settings::Computer::ModifierAlt.arg(name)).toString()));
   setModifier(AltGr, modifierValueFromString(Settings::value(Settings::Computer::ModifierAltGr.arg(name)).toString()));
   setModifier(Ctrl, modifierValueFromString(Settings::value(Settings::Computer::ModifierCtrl.arg(name)).toString()));
@@ -66,6 +68,10 @@ void Computer::saveSettings(QSettingsProxy &settings) const
   Settings::setValue(Settings::Computer::Name.arg(computerName), computerName);
   Settings::setValue(Settings::Computer::Aliases.arg(computerName), m_Aliases);
   Settings::setValue(Settings::Computer::Geometry.arg(computerName), m_geometry);
+  Settings::setValue(
+      Settings::Computer::Monitors.arg(computerName),
+      m_monitors.isEmpty() ? QVariant() : deskflow::layout::rectsToVariant(m_monitors)
+  );
   Settings::setValue(Settings::Computer::HalfDuplexCapsLock.arg(computerName), m_Fixes[static_cast<int>(CapsLock)]);
   Settings::setValue(Settings::Computer::HalfDuplexNumLock.arg(computerName), m_Fixes[static_cast<int>(NumLock)]);
   Settings::setValue(Settings::Computer::HalfDuplexScrollLock.arg(computerName), m_Fixes[static_cast<int>(ScrollLock)]);
@@ -120,5 +126,20 @@ bool Computer::operator==(const Computer &computer) const
   return m_Name == computer.m_Name && m_Aliases == computer.m_Aliases && m_Modifiers == computer.m_Modifiers &&
          m_SwitchCorners == computer.m_SwitchCorners && m_SwitchCornerSize == computer.m_SwitchCornerSize &&
          m_Fixes == computer.m_Fixes && m_Swapped == computer.m_Swapped && m_isServer == computer.m_isServer &&
-         m_geometry == computer.m_geometry;
+         m_geometry == computer.m_geometry && m_monitors == computer.m_monitors;
+}
+
+QList<QRect> Computer::layoutRects() const
+{
+  return deskflow::layout::placedRects(m_geometry, m_monitors);
+}
+
+void Computer::setMonitors(const QList<QRect> &monitors)
+{
+  const auto bounds = deskflow::layout::boundingRect(monitors);
+  m_monitors.clear();
+  for (const auto &monitor : monitors)
+    m_monitors.append(monitor.translated(-bounds.topLeft()));
+  if (bounds.isValid())
+    m_geometry = QRect(m_geometry.topLeft(), bounds.size());
 }

@@ -18,6 +18,7 @@ private Q_SLOTS:
   void addClient_newClient_leftOfServer();
   void commit_addedClient_geometryInComputerSettings();
   void recall_committedLayout_sameComputers();
+  void setServerMonitors_lShape_clientFitsInCorner();
 
 private:
   inline static const QString m_settingsPath = QStringLiteral("tmp/test");

@@ -24,6 +24,12 @@ public:
   QMap<QString, QRect> rects(const QString &except = {}) const;
 
   /**
+   * @brief layoutRects returns the rects every placed computer except @p except takes up, one per monitor
+   * for a computer laid out by its monitors, so a computer can be placed in a gap between them
+   */
+  QList<QRect> layoutRects(const QString &except = {}) const;
+
+  /**
    * @brief freeSpotNextTo finds a free rect of @p size flush against @p anchor, trying
    * left, right, up then down; otherwise to the right of all computers
    */

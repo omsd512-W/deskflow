@@ -15,6 +15,8 @@ private Q_SLOTS:
   void initTestCase();
   void basicFunctionality();
   void loadSettings_savedGeometry_restored();
+  void setMonitors_desktopRects_storedRelativeToGeometry();
+  void loadSettings_savedMonitors_restored();
 
 private:
   inline static const QString m_settingsPath = QStringLiteral("tmp/test");

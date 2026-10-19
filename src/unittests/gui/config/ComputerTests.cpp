@@ -49,4 +49,36 @@ void ComputerTests::loadSettings_savedGeometry_restored()
   QCOMPARE(loaded.geometry(), QRect(-1920, 0, 1920, 1080));
 }
 
+void ComputerTests::setMonitors_desktopRects_storedRelativeToGeometry()
+{
+  Computer server("desk");
+  server.setGeometry(QRect(100, 200, 1920, 1080));
+
+  // an L whose top monitor starts 12 pixels left of the bottom right one, as Windows reports them
+  server.setMonitors({QRect(0, 0, 2560, 1440), QRect(2560, 0, 2560, 1080), QRect(2548, -1080, 1920, 1080)});
+
+  QCOMPARE(server.geometry(), QRect(100, 200, 5120, 2520));
+  QCOMPARE(
+      server.monitors(),
+      QList<QRect>({QRect(0, 1080, 2560, 1440), QRect(2560, 1080, 2560, 1080), QRect(2548, 0, 1920, 1080)})
+  );
+  QCOMPARE(
+      server.layoutRects(),
+      QList<QRect>({QRect(100, 1280, 2560, 1440), QRect(2660, 1280, 2560, 1080), QRect(2648, 200, 1920, 1080)})
+  );
+}
+
+void ComputerTests::loadSettings_savedMonitors_restored()
+{
+  Computer saved("desk");
+  saved.setMonitors({QRect(0, 0, 2560, 1440), QRect(2560, 0, 2560, 1080)});
+  saved.saveSettings(Settings::proxy());
+
+  Computer loaded;
+  loaded.loadSettings(Settings::proxy());
+
+  QCOMPARE(loaded.monitors(), saved.monitors());
+  QCOMPARE(loaded, saved);
+}
+
 QTEST_MAIN(ComputerTests)

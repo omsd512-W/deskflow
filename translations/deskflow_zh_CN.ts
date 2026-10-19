@@ -309,6 +309,26 @@ p, li { white-space: pre-wrap; }
         <translation type="unfinished">移除(&amp;R)</translation>
     </message>
     <message>
+        <source>Size in layout</source>
+        <translation>布局中的尺寸</translation>
+    </message>
+    <message>
+        <source> px</source>
+        <translation> 像素</translation>
+    </message>
+    <message>
+        <source>Use the computer&apos;s screen resolution to line it up pixel for pixel</source>
+        <translation>填写这台电脑的屏幕分辨率，即可按像素对齐</translation>
+    </message>
+    <message>
+        <source>Width</source>
+        <translation>宽</translation>
+    </message>
+    <message>
+        <source>Height</source>
+        <translation>高</translation>
+    </message>
+    <message>
         <source>Computer name is empty</source>
         <translation type="unfinished">计算机名称为空</translation>
     </message>
@@ -917,8 +937,16 @@ Additionally, check you are able to %1 the server config file: %2</source>
         <translation type="unfinished">Super</translation>
     </message>
     <message>
-        <source>&lt;center&gt;Computer: &lt;b&gt;%1&lt;/b&gt;&lt;/center&gt;&lt;br&gt;Drag next to another computer to link their edges&lt;br&gt;Drag the bottom right corner to resize&lt;br&gt;Double click to edit settings&lt;br&gt;Drag computer to the trashcan to remove it</source>
-        <translation type="unfinished"></translation>
+        <source>&lt;br&gt;Its monitors are arranged in the system display settings</source>
+        <translation>&lt;br&gt;显示器的排列在系统显示设置中调整</translation>
+    </message>
+    <message>
+        <source>&lt;br&gt;Drag the bottom right corner to resize, or set the size in pixels in its settings</source>
+        <translation>&lt;br&gt;拖动右下角调整大小，或在设置里填写像素尺寸</translation>
+    </message>
+    <message>
+        <source>&lt;center&gt;Computer: &lt;b&gt;%1&lt;/b&gt;&lt;/center&gt;&lt;br&gt;Drag next to another computer to link their edges%2&lt;br&gt;Double click to edit settings&lt;br&gt;Drag computer to the trashcan to remove it</source>
+        <translation>&lt;center&gt;电脑：&lt;b&gt;%1&lt;/b&gt;&lt;/center&gt;&lt;br&gt;拖到另一台电脑旁边即可连接它们的边缘%2&lt;br&gt;双击编辑设置&lt;br&gt;拖到垃圾桶即可移除</translation>
     </message>
 </context>
 <context>
