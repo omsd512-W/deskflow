@@ -61,6 +61,9 @@ enum
 
 static const double kCarbonLoopWaitTimeout = 10.0;
 
+// how long the hidden cursor stays where it left before it's parked
+static const double kParkCursorDelay = 2.0;
+
 // Synthetic mouse button and drag events require event numbers on macOS 27 and later.
 static inline bool needsEventNumber()
 {
@@ -97,6 +100,7 @@ OSXComputer::OSXComputer(IEventQueue *events, bool isPrimary, bool enableLangSyn
       m_ownClipboard(false),
       m_clipboardTimer(nullptr),
       m_axTimer(nullptr),
+      m_parkCursorTimer(nullptr),
       m_hiddenWindow(nullptr),
       m_userInputWindow(nullptr),
       m_switchEventHandlerRef(0),
@@ -786,11 +790,14 @@ void OSXComputer::disable()
     m_axTimer = nullptr;
   }
 
+  cancelParkCursor();
+
   m_isOnComputer = m_isPrimary;
 }
 
 void OSXComputer::enter()
 {
+  cancelParkCursor();
   m_isOnComputer = true;
   showCursor();
 
@@ -829,10 +836,39 @@ void OSXComputer::leave()
     // a client (onMouseMove reads raw deltas instead). must follow hideCursor(),
     // which re-associates. re-coupled in enter()/disable().
     CGAssociateMouseAndMouseCursorPosition(false);
+  } else {
+    // left where it crossed the edge, the hidden cursor keeps the dock
+    // revealed, or a hot corner triggered, until it comes back. park it a
+    // while later rather than now, so the dock doesn't vanish the moment the
+    // cursor leaves.
+    cancelParkCursor();
+    m_parkCursorTimer = m_events->newOneShotTimer(kParkCursorDelay, nullptr);
+    m_events->addHandler(EventTypes::Timer, m_parkCursorTimer, [this](const auto &) { parkCursor(); });
   }
 
   // now off computer
   m_isOnComputer = false;
+}
+
+void OSXComputer::parkCursor()
+{
+  cancelParkCursor();
+
+  // in the center, as on enable(). a real motion event, not a warp, so the
+  // dock sees the cursor go. not while a button is down, which would drag.
+  // the next enter moves it to the entry point.
+  if (!m_isOnComputer && m_buttonState.getFirstButtonDown() == -1) {
+    fakeMouseMove(m_xCenter, m_yCenter);
+  }
+}
+
+void OSXComputer::cancelParkCursor()
+{
+  if (m_parkCursorTimer != nullptr) {
+    m_events->removeHandler(EventTypes::Timer, m_parkCursorTimer);
+    m_events->deleteTimer(m_parkCursorTimer);
+    m_parkCursorTimer = nullptr;
+  }
 }
 
 bool OSXComputer::setClipboard(ClipboardID, const IClipboard *src)

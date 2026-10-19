@@ -132,6 +132,10 @@ private:
   void showCursor();
   void hideCursor();
 
+  // move the hidden cursor away from the edge it left by, a while after leaving
+  void parkCursor();
+  void cancelParkCursor();
+
   // map deskflow mouse button to mac buttons
   ButtonID mapDeskflowButtonToMac(uint16_t) const;
 
@@ -268,6 +272,8 @@ private:
   EventQueueTimer *m_clipboardTimer;
 
   EventQueueTimer *m_axTimer;
+
+  EventQueueTimer *m_parkCursorTimer;
 
   // window object that gets user input events when the server
   // has focus.
