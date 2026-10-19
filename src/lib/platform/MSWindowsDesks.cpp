@@ -533,11 +533,10 @@ void setCursorVisibility(bool visible)
 
 void MSWindowsDesks::deskEnter(Desk *desk)
 {
-  if (!m_isPrimary) {
-    ReleaseCapture();
-    if (m_relativeMouseMoves) {
-      restoreRelativeCursorPosition(desk);
-    }
+  // the primary captures the mouse on leave too, see deskLeave()
+  ReleaseCapture();
+  if (!m_isPrimary && m_relativeMouseMoves) {
+    restoreRelativeCursorPosition(desk);
   }
 
   setCursorVisibility(true);
@@ -621,6 +620,17 @@ void MSWindowsDesks::deskLeave(Desk *desk, HKL keyLayout)
         SetForegroundWindow(desk->m_window);
         AttachThreadInput(thatThread, thisThread, FALSE);
       }
+
+      // hide the cursor where it is now, before it's warped to the hider
+      // window in the center. the hidden display count above only applies
+      // over this thread's windows, and this thread can't handle the hider
+      // window's WM_SETCURSOR until we return, so without the capture the
+      // cursor is drawn in the center of the primary monitor for a few
+      // frames on its way off the computer. unlike the secondary below, don't
+      // wait here for it to be hidden: this thread runs the low level hooks,
+      // so blocking it stalls all mouse input.
+      SetCapture(desk->m_window);
+      SetCursor(m_cursor);
     }
   } else {
     // move hider window under the cursor center, raise, and show it
