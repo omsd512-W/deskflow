@@ -1284,6 +1284,14 @@ bool MSWindowsComputer::onMouseMove(int32_t mx, int32_t my)
         -y + bogusZoneSize > m_yCenter || y + bogusZoneSize > m_hPrimary - m_yCenter) {
 
       LOG_DEBUG("dropped bogus delta motion: %+d,%+d", x, y);
+
+      // don't measure the next motion from this position either. the hook
+      // can report a burst of positions from before the warp, each relative
+      // to where the cursor was rather than to the center, so measured from
+      // each other they come out as small motions in random directions. on
+      // entering a client at its very edge, any of those away from the edge
+      // switches straight back.
+      saveMousePosition(m_xCenter, m_yCenter);
     } else {
       // send motion
       sendEvent(EventTypes::PrimaryComputerMotionOnSecondary, MotionInfo::alloc(x, y));
