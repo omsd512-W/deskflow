@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <initializer_list>
 
 namespace deskflow::layout {
 
@@ -29,7 +30,12 @@ double percent(int value, int start, int length)
   return (value - start) * 100.0 / length;
 }
 
-bool linkOnSide(const QString &a, const QRect &ra, const QString &b, const QRect &rb, Side side, Link &link)
+// ra and rb are the touching rectangles (e.g. one monitor each), while the ranges are percentages of the
+// computers' bounding rectangles boundsA and boundsB, which is the shape the server switches on.
+bool linkOnSide(
+    const QString &a, const QRect &ra, const QRect &boundsA, const QString &b, const QRect &rb, const QRect &boundsB,
+    Side side, Link &link
+)
 {
   const bool horizontal = side == Side::Right || side == Side::Left;
 
@@ -60,14 +66,18 @@ bool linkOnSide(const QString &a, const QRect &ra, const QString &b, const QRect
   if (overlapEnd <= overlapStart)
     return false;
 
+  const int boundsAStart = horizontal ? boundsA.y() : boundsA.x();
+  const int boundsALength = horizontal ? boundsA.height() : boundsA.width();
+  const int boundsBStart = horizontal ? boundsB.y() : boundsB.x();
+  const int boundsBLength = horizontal ? boundsB.height() : boundsB.width();
   link = {
       a,
       side,
-      percent(overlapStart, aStart, aLength),
-      percent(overlapEnd, aStart, aLength),
+      percent(overlapStart, boundsAStart, boundsALength),
+      percent(overlapEnd, boundsAStart, boundsALength),
       b,
-      percent(overlapStart, bStart, bLength),
-      percent(overlapEnd, bStart, bLength)
+      percent(overlapStart, boundsBStart, boundsBLength),
+      percent(overlapEnd, boundsBStart, boundsBLength)
   };
   return true;
 }
@@ -76,20 +86,100 @@ bool linkOnSide(const QString &a, const QRect &ra, const QString &b, const QRect
 
 QList<Link> computeLinks(const QMap<QString, QRect> &computers)
 {
+  QMap<QString, QList<QRect>> single;
+  for (const auto &[name, rect] : computers.asKeyValueRange())
+    single.insert(name, {rect});
+  return computeLinks(single);
+}
+
+QList<Link> computeLinks(const QMap<QString, QList<QRect>> &computers)
+{
+  QMap<QString, QRect> bounds;
+  for (const auto &[name, rects] : computers.asKeyValueRange())
+    bounds.insert(name, boundingRect(rects));
+
   QList<Link> links;
-  for (const auto &[from, fromRect] : computers.asKeyValueRange()) {
+  for (const auto &[from, fromRects] : computers.asKeyValueRange()) {
     for (const auto side : {Side::Right, Side::Left, Side::Up, Side::Down}) {
       QList<Link> sideLinks;
-      for (const auto &[to, toRect] : computers.asKeyValueRange()) {
-        Link link;
-        if (from != to && linkOnSide(from, fromRect, to, toRect, side, link))
-          sideLinks.append(link);
+      for (const auto &[to, toRects] : computers.asKeyValueRange()) {
+        if (from == to)
+          continue;
+        for (const auto &fromRect : fromRects) {
+          for (const auto &toRect : toRects) {
+            Link link;
+            if (linkOnSide(from, fromRect, bounds.value(from), to, toRect, bounds.value(to), side, link))
+              sideLinks.append(link);
+          }
+        }
       }
       std::ranges::sort(sideLinks, {}, &Link::fromStart);
       links.append(sideLinks);
     }
   }
   return links;
+}
+
+QRect boundingRect(const QList<QRect> &rects)
+{
+  QRect result;
+  for (const auto &rect : rects)
+    result = result.united(rect);
+  return result;
+}
+
+QPoint snapGroup(const QList<QRect> &moving, const QList<QRect> &others, int threshold)
+{
+  // Each axis snaps on its own, flush against or lined up with an edge of a rect that is beside the moving one
+  // on the other axis, so a rect can tuck into a corner between two others.
+  const auto beside = [threshold](int aStart, int aEnd, int bStart, int bEnd) {
+    return aStart < bEnd + threshold && bStart < aEnd + threshold;
+  };
+  QList<int> xs;
+  QList<int> ys;
+  const auto add = [threshold](QList<int> &deltas, std::initializer_list<int> candidates) {
+    for (const int delta : candidates) {
+      if (std::abs(delta) <= threshold && !deltas.contains(delta))
+        deltas.append(delta);
+    }
+  };
+  for (const auto &m : moving) {
+    for (const auto &o : others) {
+      if (beside(m.y(), bottomEdge(m), o.y(), bottomEdge(o)))
+        add(xs, {o.x() - rightEdge(m), rightEdge(o) - m.x(), o.x() - m.x(), rightEdge(o) - rightEdge(m)});
+      if (beside(m.x(), rightEdge(m), o.x(), rightEdge(o)))
+        add(ys, {o.y() - bottomEdge(m), bottomEdge(o) - m.y(), o.y() - m.y(), bottomEdge(o) - bottomEdge(m)});
+    }
+  }
+
+  // Prefer snapping both axes, then one, closest first, and skip any offset that would overlap the others:
+  // lining up with the nearest edge can push the group into a neighbour on the other side of a corner.
+  const auto clear = [&moving, &others](const QPoint &offset) {
+    return std::ranges::none_of(moving, [&](const QRect &m) { return overlapsAny(m.translated(offset), others); });
+  };
+  QList<QPoint> both;
+  for (const int dx : xs) {
+    for (const int dy : ys)
+      both.append(QPoint(dx, dy));
+  }
+  QList<QPoint> one;
+  for (const int dx : xs)
+    one.append(QPoint(dx, 0));
+  for (const int dy : ys)
+    one.append(QPoint(0, dy));
+  for (auto *candidates : {&both, &one}) {
+    std::ranges::stable_sort(*candidates, {}, &QPoint::manhattanLength);
+    for (const auto &offset : *candidates) {
+      if (clear(offset))
+        return offset;
+    }
+  }
+  return {};
+}
+
+bool overlapsAny(const QList<QRect> &rects, const QList<QRect> &others)
+{
+  return std::ranges::any_of(rects, [&others](const QRect &rect) { return overlapsAny(rect, others); });
 }
 
 QRect snap(const QRect &moving, const QList<QRect> &others, int threshold)

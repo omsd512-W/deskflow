@@ -17,6 +17,13 @@ private Q_SLOTS:
   void computeLinks_stacked_upDownLinks();
   void computeLinks_gapBetween_noLinks();
   void computeLinks_cornerTouch_noLinks();
+  void computeLinks_clientInCornerOfLShapedServer_linksOnInnerEdges();
+  void computeLinks_monitorsOfOneComputer_notLinkedToEachOther();
+  void computeLinks_clientBelowTwoMonitors_oneLinkPerMonitor();
+  void boundingRect_unitesAll();
+  void snapGroup_nearEdge_offsetOfClosestRect();
+  void snapGroup_farFromOthers_null();
+  void snapGroup_nearCornerOfLShape_tucksInWithoutOverlap();
   void snap_nearRightEdge_flushAndAligned();
   void snap_nearTopEdge_flushAndAligned();
   void snap_farFromOthers_unchanged();

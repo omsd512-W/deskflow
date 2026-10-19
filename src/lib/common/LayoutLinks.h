@@ -49,6 +49,26 @@ struct Link
 QList<Link> computeLinks(const QMap<QString, QRect> &computers);
 
 /**
+ * @brief Computes links between computers made of one or more rectangles, e.g. one per monitor.
+ * Each rectangle of a computer that shares an edge with a rectangle of another computer gives a link over
+ * the shared part of that edge. Ranges are percentages of each computer's bounding rectangle, which is the
+ * shape the server switches on, so a link can sit on an inner edge of an L-shaped arrangement of monitors.
+ */
+QList<Link> computeLinks(const QMap<QString, QList<QRect>> &computers);
+
+/**
+ * @brief Smallest rectangle containing all of @p rects, invalid if there are none.
+ */
+QRect boundingRect(const QList<QRect> &rects);
+
+/**
+ * @brief Offset that snaps a group of rects (e.g. a computer's monitors) against @p others: each axis moves flush
+ * against or lines up with the nearest edge within @p threshold, so the group can tuck into a corner between two
+ * rects. Offsets that would overlap @p others are skipped. Null when nothing fits within @p threshold.
+ */
+QPoint snapGroup(const QList<QRect> &moving, const QList<QRect> &others, int threshold);
+
+/**
  * @brief Moves @p moving flush against the nearest edge of @p others within @p threshold,
  * then aligns it with that neighbour's parallel edges if they are also within @p threshold.
  */
@@ -61,5 +81,6 @@ QRect snap(const QRect &moving, const QList<QRect> &others, int threshold);
 QRect snapResize(const QRect &resized, const QList<QRect> &others, int threshold);
 
 bool overlapsAny(const QRect &rect, const QList<QRect> &others);
+bool overlapsAny(const QList<QRect> &rects, const QList<QRect> &others);
 
 } // namespace deskflow::layout
