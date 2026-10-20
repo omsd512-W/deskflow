@@ -94,6 +94,26 @@ ComputerSettingsDialog::ComputerSettingsDialog(QWidget *parent, Computer *comput
       mainLayout->insertWidget(1, group);
   }
 
+  // Motion on a client is scaled by its mouse speed, e.g. to make up for its screen having smaller pixels than the
+  // server's. Motion on the server itself isn't scaled.
+  if (!m_computer->isServer()) {
+    auto *group = new QGroupBox(tr("Mouse"), this);
+    auto *row = new QHBoxLayout(group);
+    m_mouseSpeed = new QSpinBox(group);
+    m_mouseSpeed->setRange(10, 500);
+    m_mouseSpeed->setValue(m_computer->mouseSpeed());
+    m_mouseSpeed->setSuffix(QStringLiteral(" %"));
+    m_mouseSpeed->setToolTip(
+        tr("How far the cursor moves on this computer for the same mouse movement, compared with the server. "
+           "Raise it if the cursor feels slower here, e.g. because this computer's screen has smaller pixels")
+    );
+    row->addWidget(new QLabel(tr("Speed"), group));
+    row->addWidget(m_mouseSpeed);
+    row->addStretch();
+    if (auto *mainLayout = qobject_cast<QBoxLayout *>(layout()); mainLayout != nullptr)
+      mainLayout->insertWidget(m_width != nullptr ? 2 : 1, group);
+  }
+
   connect(ui->buttonBox, &QDialogButtonBox::accepted, this, &ComputerSettingsDialog::accept);
   connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &ComputerSettingsDialog::reject);
   connect(ui->btnAddAlias, &QPushButton::clicked, this, &ComputerSettingsDialog::addAlias);
@@ -146,6 +166,8 @@ void ComputerSettingsDialog::accept()
   m_computer->setSwitchCorner(BottomLeft, ui->chkDeadBottomLeft->isChecked());
   m_computer->setSwitchCorner(BottomRight, ui->chkDeadBottomRight->isChecked());
   m_computer->setSwitchCornerSize(ui->sbSwitchCornerSize->value());
+  if (m_mouseSpeed != nullptr)
+    m_computer->setMouseSpeed(m_mouseSpeed->value());
 
   m_computer->setFix(CapsLock, ui->chkFixCapsLock->isChecked());
   m_computer->setFix(NumLock, ui->chkFixNumLock->isChecked());

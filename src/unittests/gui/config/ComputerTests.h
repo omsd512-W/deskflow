@@ -17,6 +17,7 @@ private Q_SLOTS:
   void loadSettings_savedGeometry_restored();
   void setMonitors_desktopRects_storedRelativeToGeometry();
   void loadSettings_savedMonitors_restored();
+  void loadSettings_savedMouseSpeed_restored();
 
 private:
   inline static const QString m_settingsPath = QStringLiteral("tmp/test");

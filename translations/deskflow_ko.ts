@@ -329,6 +329,18 @@ p, li { white-space: pre-wrap; }
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Mouse</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>How far the cursor moves on this computer for the same mouse movement, compared with the server. Raise it if the cursor feels slower here, e.g. because this computer&apos;s screen has smaller pixels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Speed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Computer name is empty</source>
         <translation type="unfinished">컴퓨터 이름이 비어 있습니다.</translation>
     </message>

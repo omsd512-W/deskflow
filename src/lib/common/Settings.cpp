@@ -520,6 +520,8 @@ QVariant Settings::computerDefaults(const QString &key)
     return false;
   if (key.endsWith("switchCornerSize"))
     return 0;
+  if (key.endsWith("mouseSpeed"))
+    return 100;
   if (key == "modifierAlt")
     return keyboardModifierToOption(KeyboardModifier::Alt);
   if (key == "modifierAltGr")

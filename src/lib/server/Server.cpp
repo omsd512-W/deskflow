@@ -217,6 +217,7 @@ bool Server::setConfig(const ServerConfig &config)
 
   // cut over
   processOptions();
+  updateMouseSpeed();
 
   // add ScrollLock as a hotkey to lock to the computer.  this was a
   // built-in feature in earlier releases and is now supported via
@@ -487,6 +488,7 @@ void Server::switchComputer(BaseClientProxy *dst, int32_t x, int32_t y, bool for
 
     // cut over
     m_active = dst;
+    updateMouseSpeed();
 
     // increment enter sequence number
     ++m_seqNum;
@@ -1349,6 +1351,25 @@ void Server::processOptions()
   m_primaryClient->setRestartServerOnZoneChange(m_config->restartServerOnZoneChange());
 }
 
+void Server::updateMouseSpeed()
+{
+  m_mouseSpeed = 1.0;
+  m_mouseRemainderX = 0.0;
+  m_mouseRemainderY = 0.0;
+  if (m_active == nullptr || m_active == m_primaryClient) {
+    return;
+  }
+
+  const Config::ScreenOptions *options = m_config->getOptions(getName(m_active));
+  if (options == nullptr) {
+    return;
+  }
+  if (const auto i = options->find(kOptionComputerMouseSpeed); i != options->end() && i->second > 0) {
+    m_mouseSpeed = i->second / 100.0;
+  }
+  LOG_DEBUG("mouse speed on \"%s\": %.2f", getName(m_active).c_str(), m_mouseSpeed);
+}
+
 void Server::handleShapeChanged(BaseClientProxy *client)
 {
   if (!m_clientSet.contains(client)) {
@@ -2030,6 +2051,17 @@ void Server::onMouseMoveSecondary(int32_t dx, int32_t dy)
   if (m_active == m_primaryClient) {
     // stale event -- we're actually on the primary computer
     return;
+  }
+
+  // scale motion by the client's mouse speed, carrying the fraction of a pixel
+  // over so that slow motion is scaled too
+  if (m_mouseSpeed != 1.0) {
+    const double x = dx * m_mouseSpeed + m_mouseRemainderX;
+    const double y = dy * m_mouseSpeed + m_mouseRemainderY;
+    dx = static_cast<int32_t>(x);
+    dy = static_cast<int32_t>(y);
+    m_mouseRemainderX = x - dx;
+    m_mouseRemainderY = y - dy;
   }
 
   // if doing relative motion on secondary computers and we're locked

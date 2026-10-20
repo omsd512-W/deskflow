@@ -46,4 +46,5 @@ private:
   // Size of the computer in the server's layout, only for computers not laid out by their monitors
   QSpinBox *m_width = nullptr;
   QSpinBox *m_height = nullptr;
+  QSpinBox *m_mouseSpeed = nullptr;
 };

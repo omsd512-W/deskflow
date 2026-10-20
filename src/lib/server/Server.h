@@ -316,6 +316,9 @@ private:
   // process options from configuration
   void processOptions();
 
+  // take the mouse speed of the active computer from the configuration
+  void updateMouseSpeed();
+
   // event handlers
   void handleShapeChanged(BaseClientProxy *client);
   void handleClipboardGrabbed(const Event &event, BaseClientProxy *client);
@@ -481,6 +484,12 @@ private:
 
   // relative mouse move option
   bool m_relativeMoves = false;
+
+  // how much mouse motion is scaled on the active client, and the fraction of a
+  // pixel carried over to the next motion
+  double m_mouseSpeed = 1.0;
+  double m_mouseRemainderX = 0.0;
+  double m_mouseRemainderY = 0.0;
 
   // flag whether or not we have broadcasting enabled and the computers to
   // which we should send broadcasted keys.

@@ -81,4 +81,22 @@ void ComputerTests::loadSettings_savedMonitors_restored()
   QCOMPARE(loaded, saved);
 }
 
+void ComputerTests::loadSettings_savedMouseSpeed_restored()
+{
+  QCOMPARE(Computer("mac").mouseSpeed(), 100);
+  QCOMPARE(Settings::value(Settings::Computer::MouseSpeed.arg("never-saved")).toInt(), 100);
+
+  Computer saved("mac");
+  saved.saveSettings(Settings::proxy());
+  Settings::setValue(Settings::Computer::MouseSpeed.arg("mac"), 113);
+
+  Computer loaded;
+  loaded.loadSettings(Settings::proxy());
+  QCOMPARE(loaded.mouseSpeed(), 113);
+  QVERIFY(!(loaded == saved));
+
+  loaded.saveSettings(Settings::proxy());
+  QCOMPARE(Settings::value(Settings::Computer::MouseSpeed.arg("mac")).toInt(), 113);
+}
+
 QTEST_MAIN(ComputerTests)

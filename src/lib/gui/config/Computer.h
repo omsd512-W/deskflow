@@ -33,14 +33,14 @@ class Computer : public ComputerConfig
   {
     return outStream << computer.name() << computer.switchCornerSize() << computer.aliases() << computer.modifiers()
                      << computer.switchCorners() << computer.fixes() << computer.isServer() << computer.geometry()
-                     << computer.monitors();
+                     << computer.monitors() << computer.mouseSpeed();
   }
 
   friend QDataStream &operator>>(QDataStream &inStream, Computer &computer)
   {
     return inStream >> computer.m_Name >> computer.m_SwitchCornerSize >> computer.m_Aliases >> computer.m_Modifiers >>
            computer.m_SwitchCorners >> computer.m_Fixes >> computer.m_isServer >> computer.m_geometry >>
-           computer.m_monitors;
+           computer.m_monitors >> computer.m_mouseSpeed;
   }
 
 public:
@@ -82,6 +82,13 @@ public:
   [[nodiscard]] int switchCornerSize() const
   {
     return m_SwitchCornerSize;
+  }
+  /**
+   * @brief How much mouse motion is scaled on the computer, in percent.
+   */
+  [[nodiscard]] int mouseSpeed() const
+  {
+    return m_mouseSpeed;
   }
   [[nodiscard]] bool fix(const Fix f) const
   {
@@ -174,6 +181,10 @@ protected:
   {
     m_SwitchCornerSize = val;
   }
+  void setMouseSpeed(const int percent)
+  {
+    m_mouseSpeed = percent;
+  }
   void setFix(const Fix f, const bool on)
   {
     m_Fixes[static_cast<int8_t>(f)] = on;
@@ -194,6 +205,7 @@ private:
   QList<int> m_Modifiers = {0, 1, 2, 3, 4, 5, 6};
   QList<bool> m_SwitchCorners = {false, false, false, false};
   int m_SwitchCornerSize = 0;
+  int m_mouseSpeed = 100;
   QList<bool> m_Fixes{false, false, false, false};
   bool m_Swapped = false;
   bool m_isServer = false;

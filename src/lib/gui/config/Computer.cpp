@@ -39,6 +39,7 @@ void Computer::loadSettings(QSettingsProxy &settings)
   setModifier(Super, modifierValueFromString(Settings::value(Settings::Computer::ModifierSuper.arg(name)).toString()));
 
   setSwitchCornerSize(Settings::value(Settings::Computer::SwitchCornerSize.arg(name)).toInt());
+  setMouseSpeed(Settings::value(Settings::Computer::MouseSpeed.arg(name)).toInt());
 
   m_SwitchCorners[static_cast<int>(TopLeft)] =
       Settings::value(Settings::Computer::SwitchCornerTopLeft.arg(name)).toBool();
@@ -77,6 +78,7 @@ void Computer::saveSettings(QSettingsProxy &settings) const
   Settings::setValue(Settings::Computer::HalfDuplexScrollLock.arg(computerName), m_Fixes[static_cast<int>(ScrollLock)]);
   Settings::setValue(Settings::Computer::XtestIsXineramaUnaware.arg(computerName), m_Fixes[static_cast<int>(XTest)]);
   Settings::setValue(Settings::Computer::SwitchCornerSize.arg(computerName), switchCornerSize());
+  Settings::setValue(Settings::Computer::MouseSpeed.arg(computerName), mouseSpeed());
   Settings::setValue(
       Settings::Computer::SwitchCornerTopLeft.arg(computerName), m_SwitchCorners[static_cast<int>(TopLeft)]
   );
@@ -125,8 +127,8 @@ bool Computer::operator==(const Computer &computer) const
 {
   return m_Name == computer.m_Name && m_Aliases == computer.m_Aliases && m_Modifiers == computer.m_Modifiers &&
          m_SwitchCorners == computer.m_SwitchCorners && m_SwitchCornerSize == computer.m_SwitchCornerSize &&
-         m_Fixes == computer.m_Fixes && m_Swapped == computer.m_Swapped && m_isServer == computer.m_isServer &&
-         m_geometry == computer.m_geometry && m_monitors == computer.m_monitors;
+         m_mouseSpeed == computer.m_mouseSpeed && m_Fixes == computer.m_Fixes && m_Swapped == computer.m_Swapped &&
+         m_isServer == computer.m_isServer && m_geometry == computer.m_geometry && m_monitors == computer.m_monitors;
 }
 
 QList<QRect> Computer::layoutRects() const
