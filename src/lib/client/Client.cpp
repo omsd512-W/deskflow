@@ -142,11 +142,17 @@ void Client::connect(size_t addressIndex)
 
 void Client::disconnect(const char *msg)
 {
+  // once connected, losing the server (e.g. it stopped responding) is a
+  // disconnection, not a failed attempt, so the gui stops showing connected
+  const bool wasConnected = m_ready;
   cleanup();
 
-  if (msg) {
+  if (msg && !wasConnected) {
     sendConnectionFailedEvent(msg);
   } else {
+    if (msg) {
+      LOG_WARN("disconnected from server: %s", msg);
+    }
     sendEvent(EventTypes::ClientDisconnected);
   }
 }
