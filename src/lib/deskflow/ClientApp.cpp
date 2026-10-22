@@ -170,6 +170,10 @@ void ClientApp::scheduleClientRestart(double retryTime)
 void ClientApp::handleClientConnected()
 {
   LOG_DEBUG("connected to server");
+  if (m_retryCount > 0) {
+    LOG_INFO("connected to server after %u failed attempts", m_retryCount);
+    m_retryCount = 0;
+  }
   ipcSendConnectionState(deskflow::core::ConnectionState::Connected);
   // Reset server index on successful connection
   m_currentServerIndex = 0;
@@ -182,7 +186,9 @@ void ClientApp::handleClientFailed(const Event &e)
     // Try next resolved address for current hostname
     std::unique_ptr<Client::FailInfo> info(static_cast<Client::FailInfo *>(e.getData()));
 
-    LOG_WARN("failed to connect to server=%s, trying next resolved address", qPrintable(info->m_what));
+    logConnectionFailure(
+        QStringLiteral("failed to connect to server=%1, trying next resolved address").arg(info->m_what)
+    );
     if (!m_suspended) {
       scheduleClientRestart(retryTime());
     }
@@ -196,7 +202,9 @@ void ClientApp::handleClientFailed(const Event &e)
       handleClientRefused(e);
     } else {
       std::unique_ptr<Client::FailInfo> info(static_cast<Client::FailInfo *>(e.getData()));
-      LOG_WARN("failed to connect to server=%s, trying next server in list", qPrintable(info->m_what));
+      logConnectionFailure(
+          QStringLiteral("failed to connect to server=%1, trying next server in list").arg(info->m_what)
+      );
       if (!m_suspended) {
         scheduleClientRestart(retryTime());
       }
@@ -212,11 +220,22 @@ void ClientApp::handleClientRefused(const Event &e)
     LOG_ERR("failed to connect to server: %s", qPrintable(info->m_what));
     getEvents()->addEvent(Event(EventTypes::Quit));
   } else {
-    LOG_WARN("failed to connect to server: %s", qPrintable(info->m_what));
+    logConnectionFailure(QStringLiteral("failed to connect to server: %1").arg(info->m_what));
     if (!m_suspended) {
       scheduleClientRestart(retryTime());
       m_retryCount++;
     }
+  }
+}
+
+void ClientApp::logConnectionFailure(const QString &message) const
+{
+  // only the first round of failures is a warning, the retries that follow
+  // would flood the log for as long as the server is offline
+  if (m_retryCount == 0) {
+    LOG_WARN("%s", qPrintable(message));
+  } else {
+    LOG_DEBUG("%s", qPrintable(message));
   }
 }
 
