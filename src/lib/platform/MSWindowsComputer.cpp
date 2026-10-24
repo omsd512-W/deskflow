@@ -1389,14 +1389,15 @@ bool MSWindowsComputer::onDisplayChange()
 void MSWindowsComputer::onClipboardChange()
 {
   // now notify client that somebody changed the clipboard (unless
-  // we're the owner).
+  // we're the owner).  report every change, not just the one that took
+  // ownership from us: the server keeps the sequence number of the last
+  // grab it saw, and an unreported change leaves it old enough for a
+  // stale grab from another computer to win and empty this clipboard.
   if (!MSWindowsClipboard::isOwnedByDeskflow()) {
-    if (m_ownClipboard) {
-      LOG_DEBUG("clipboard changed: lost ownership");
-      m_ownClipboard = false;
-      sendClipboardEvent(EventTypes::ClipboardGrabbed, kClipboardClipboard);
-      sendClipboardEvent(EventTypes::ClipboardGrabbed, kClipboardSelection);
-    }
+    LOG_DEBUG("clipboard changed: %s", m_ownClipboard ? "lost ownership" : "changed again");
+    m_ownClipboard = false;
+    sendClipboardEvent(EventTypes::ClipboardGrabbed, kClipboardClipboard);
+    sendClipboardEvent(EventTypes::ClipboardGrabbed, kClipboardSelection);
   } else if (!m_ownClipboard) {
     LOG_DEBUG("clipboard changed: %s owned", kAppId);
     m_ownClipboard = true;
