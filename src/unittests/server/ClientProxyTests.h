@@ -22,6 +22,13 @@ private Q_SLOTS:
   void keyRepeat();
   void keyUp_data();
   void keyUp();
+  void clipboardSentOneChunkAtATime();
+  void clipboardKeepsMovingWithoutFlush();
+  void inputIsNotHeldBehindClipboard();
+  void selectionMatchingClipboardIsNotSent();
+  void selectionDifferentFromClipboardIsSent();
+  void onlyNewestQueuedClipboardIsSent();
+  void newerClipboardReplacesTransferInProgress();
 
 private:
   Log m_log;

@@ -9,9 +9,22 @@
 #include "base/Log.h"
 #include "deskflow/ClipboardChunk.h"
 #include "deskflow/ProtocolUtil.h"
-#include "deskflow/StreamChunker.h"
 #include "io/IStream.h"
 #include "server/Server.h"
+
+#include <algorithm>
+#include <memory>
+
+namespace {
+
+// Mouse moves share this connection, so a move written during a transfer waits
+// for whatever is ahead of it. A chunk this size takes about 6 ms at 100 Mbps.
+constexpr size_t kClipboardChunkSize = 64 * 1024;
+
+// Keeps a transfer moving if the stream never reports that it flushed.
+constexpr double kClipboardFlushTimeout = 0.05;
+
+} // namespace
 
 //
 // ClientProxy1_6
@@ -21,14 +34,17 @@ ClientProxy1_6::ClientProxy1_6(const std::string &name, deskflow::IStream *strea
     : ClientProxy1_5(name, stream, server, events),
       m_events(events)
 {
-  m_events->addHandler(EventTypes::ClipboardSending, this, [this](const auto &e) {
-    ClipboardChunk::send(getStream(), e.getDataObject());
+  m_events->addHandler(EventTypes::StreamOutputFlushed, getStream()->getEventTarget(), [this](const auto &) {
+    if (m_clipboardFlushTimer != nullptr) {
+      sendNextClipboardChunk();
+    }
   });
 }
 
 ClientProxy1_6::~ClientProxy1_6()
 {
-  m_events->removeHandler(EventTypes::ClipboardSending, this);
+  stopClipboardFlushTimer();
+  m_events->removeHandler(EventTypes::StreamOutputFlushed, getStream()->getEventTarget());
 }
 
 void ClientProxy1_6::setClipboard(ClipboardID id, const IClipboard *clipboard)
@@ -41,10 +57,66 @@ void ClientProxy1_6::setClipboard(ClipboardID id, const IClipboard *clipboard)
 
     std::string data = m_clipboard[id].m_clipboard.marshall();
 
-    size_t size = data.size();
+    // Windows and macOS have one clipboard and report it under both IDs, so the
+    // selection is usually a copy of what this client already has.
+    if (id == kClipboardSelection && !m_clipboard[kClipboardClipboard].m_dirty &&
+        data == m_clipboard[kClipboardClipboard].m_clipboard.marshall()) {
+      LOG_DEBUG(
+          "not sending clipboard %d to \"%s\", it matches clipboard %d", id, getName().c_str(), kClipboardClipboard
+      );
+      return;
+    }
+
     LOG_DEBUG("sending clipboard %d to \"%s\"", id, getName().c_str());
 
-    StreamChunker::sendClipboard(data, size, id, 0, m_events, this);
+    // Only the newest copy needs to reach the client, so this replaces any older
+    // transfer. The client drops a partial transfer when a new one starts.
+    std::erase_if(m_clipboardTransfers, [id](const ClipboardTransfer &transfer) { return transfer.id == id; });
+    m_clipboardTransfers.push_back({.id = id, .data = std::move(data)});
+
+    if (m_clipboardFlushTimer == nullptr) {
+      sendNextClipboardChunk();
+    }
+  }
+}
+
+void ClientProxy1_6::sendNextClipboardChunk()
+{
+  stopClipboardFlushTimer();
+
+  if (m_clipboardTransfers.empty()) {
+    return;
+  }
+
+  auto &transfer = m_clipboardTransfers.front();
+  std::unique_ptr<ClipboardChunk> chunk;
+  if (!transfer.started) {
+    transfer.started = true;
+    chunk.reset(ClipboardChunk::start(transfer.id, 0, std::to_string(transfer.data.size())));
+  } else if (transfer.sent < transfer.data.size()) {
+    const auto size = std::min(kClipboardChunkSize, transfer.data.size() - transfer.sent);
+    chunk.reset(ClipboardChunk::data(transfer.id, 0, transfer.data.substr(transfer.sent, size)));
+    transfer.sent += size;
+  } else {
+    chunk.reset(ClipboardChunk::end(transfer.id, 0));
+    m_clipboardTransfers.pop_front();
+  }
+
+  ClipboardChunk::send(getStream(), chunk.get());
+
+  // wait for this chunk to leave so that input written now is not stuck behind more of the clipboard
+  if (!m_clipboardTransfers.empty()) {
+    m_clipboardFlushTimer = m_events->newOneShotTimer(kClipboardFlushTimeout, nullptr);
+    m_events->addHandler(EventTypes::Timer, m_clipboardFlushTimer, [this](const auto &) { sendNextClipboardChunk(); });
+  }
+}
+
+void ClientProxy1_6::stopClipboardFlushTimer()
+{
+  if (m_clipboardFlushTimer != nullptr) {
+    m_events->removeHandler(EventTypes::Timer, m_clipboardFlushTimer);
+    m_events->deleteTimer(m_clipboardFlushTimer);
+    m_clipboardFlushTimer = nullptr;
   }
 }
 
