@@ -192,6 +192,11 @@ private: // HACK
   // fix timer callback
   void handleFixes();
 
+  // notice when the low level mouse hook stops seeing the mouse and put it
+  // back, see checkMouseHook()
+  void checkMouseHook();
+  void resetMouseHookCheck();
+
   // fix the clipboard viewer chain
   void fixClipboardViewer();
 
@@ -299,6 +304,19 @@ private:
 
   // timer for periodically checking stuff that requires polling
   EventQueueTimer *m_fixTimer = nullptr;
+
+  // mouse hook watchdog: mouse events the hook reported, in all and at the
+  // last check, where the cursor was then, and whether the next check only
+  // records that because the cursor was moved on purpose
+  EventQueueTimer *m_hookTimer = nullptr;
+  uint64_t m_hookMouseEvents = 0;
+  uint64_t m_hookMouseEventsChecked = 0;
+  int32_t m_hookCheckX = 0;
+  int32_t m_hookCheckY = 0;
+  bool m_hookCheckBaseline = true;
+  HWND m_foregroundAtLeave = nullptr;
+  uint32_t m_hookLosses = 0;
+  double m_hookLossLoggedAt = 0;
 
   // the keyboard layout to use when off primary computer
   HKL m_keyLayout = nullptr;

@@ -70,6 +70,14 @@ public:
 
   static int uninstall();
 
+  //! Put the low level mouse hook back at the head of the hook chain
+  /*!
+  Windows drops a low level hook without telling us when the thread that
+  installed it stalls, and a later hook that doesn't call the next one hides
+  events from it. Must run on the thread that called install().
+  */
+  static bool reinstallMouseHook();
+
   static int installScreenSaver();
 
   static int uninstallScreenSaver();

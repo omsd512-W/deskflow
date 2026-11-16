@@ -127,6 +127,13 @@ public:
   */
   void installScreensaverHooks(bool install);
 
+  //! Reinstall the low level mouse hook
+  /*!
+  For when it stops seeing the mouse, see MSWindowsHook::reinstallMouseHook().
+  Returns false if the desk has no low level hooks to reinstall.
+  */
+  bool reinstallMouseHook();
+
   //! Start ignoring user input
   /*!
   Starts ignoring user input so we don't pick up our own synthesized events.

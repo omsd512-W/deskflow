@@ -28,8 +28,11 @@
 #include "platform/MSWindowsKeyState.h"
 #include "platform/MSWindowsScreenSaver.h"
 
+#include <QString>
 #include <Shlobj.h>
 #include <algorithm>
+#include <cstdlib>
+#include <string>
 #include <comutil.h>
 #include <string.h>
 
@@ -71,6 +74,30 @@
 #if !defined(PBT_APMRESUMEAUTOMATIC)
 #define PBT_APMRESUMEAUTOMATIC 0x0012
 #endif
+
+namespace {
+
+// the executable that owns a window, for the log
+std::string foregroundProcessName(HWND window)
+{
+  DWORD pid = 0;
+  if (window == nullptr || GetWindowThreadProcessId(window, &pid) == 0) {
+    return "nothing";
+  }
+  std::string name = "pid " + std::to_string(pid);
+  if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid); process != nullptr) {
+    wchar_t path[MAX_PATH];
+    DWORD size = MAX_PATH;
+    if (QueryFullProcessImageNameW(process, 0, path, &size)) {
+      const std::wstring full(path, size);
+      name = QString::fromStdWString(full.substr(full.find_last_of(L'\\') + 1)).toStdString();
+    }
+    CloseHandle(process);
+  }
+  return name;
+}
+
+} // namespace
 
 //
 // MSWindowsComputer
@@ -197,6 +224,12 @@ void MSWindowsComputer::enable()
 
     // watch jump zones
     m_hook.setMode(kHOOK_WATCH_JUMP_ZONE);
+
+    if (m_useHooks) {
+      resetMouseHookCheck();
+      m_hookTimer = m_events->newTimer(0.25, nullptr);
+      m_events->addHandler(EventTypes::Timer, m_hookTimer, [this](const auto &) { checkMouseHook(); });
+    }
   }
 }
 
@@ -230,6 +263,11 @@ void MSWindowsComputer::disable()
     m_events->deleteTimer(m_fixTimer);
     m_fixTimer = nullptr;
   }
+  if (m_hookTimer != nullptr) {
+    m_events->removeHandler(EventTypes::Timer, m_hookTimer);
+    m_events->deleteTimer(m_hookTimer);
+    m_hookTimer = nullptr;
+  }
 
   m_isOnComputer = m_isPrimary;
 }
@@ -248,6 +286,7 @@ void MSWindowsComputer::enter()
     nextMark();
 
     m_primaryKeyDownList.clear();
+    resetMouseHookCheck();
   } else {
     // Entering a secondary computer. Ensure that no screensaver is active
     // and that the computer is not in powersave mode.
@@ -287,6 +326,9 @@ void MSWindowsComputer::leave()
   m_keyState->setKeyLayout(m_keyLayout);
 
   if (m_isPrimary) {
+    // for the log, should the mouse hook stop working while on the client
+    m_foregroundAtLeave = GetForegroundWindow();
+
     // keep the cursor still until the warp below. motion passed on in between
     // moves it off the windows hiding it, where it shows until the next
     // motion warps it back, a few frames later if the switch is busy with
@@ -324,6 +366,7 @@ void MSWindowsComputer::leave()
         LOG_VERBOSE("key button %d is down before leaving to another computer", i);
       }
     }
+    resetMouseHookCheck();
   }
 
   // now off computer
@@ -531,6 +574,7 @@ void MSWindowsComputer::warpCursor(int32_t x, int32_t y)
 {
   // warp mouse
   warpCursorNoFlush(x, y);
+  resetMouseHookCheck();
 
   // remove all input events before and including warp
   MSG msg;
@@ -910,12 +954,15 @@ bool MSWindowsComputer::onPreDispatchPrimary(HWND, UINT message, WPARAM wParam, 
     return onKey(wParam, lParam);
 
   case DESKFLOW_MSG_MOUSE_BUTTON:
+    ++m_hookMouseEvents;
     return onMouseButton(wParam, lParam);
 
   case DESKFLOW_MSG_MOUSE_MOVE:
+    ++m_hookMouseEvents;
     return onMouseMove(static_cast<int32_t>(wParam), static_cast<int32_t>(lParam));
 
   case DESKFLOW_MSG_MOUSE_WHEEL:
+    ++m_hookMouseEvents;
     return onMouseWheel(static_cast<int32_t>(lParam), static_cast<int32_t>(wParam));
 
   case DESKFLOW_MSG_PRE_WARP: {
@@ -1365,6 +1412,7 @@ bool MSWindowsComputer::onDisplayChange()
   // do nothing if neither the resolution nor the monitor arrangement changed
   // (monitors can move around inside the same bounding box)
   if (xOld != m_x || yOld != m_y || wOld != m_w || hOld != m_h || shapeHolesOld != m_shapeHoles) {
+    resetMouseHookCheck();
     if (m_isPrimary) {
       if (!m_isOnComputer) {
         LOG_VERBOSE("centering cursor on display change: %+d, %+d", m_xCenter, m_yCenter);
@@ -1533,6 +1581,70 @@ void MSWindowsComputer::handleFixes()
   // update keys if keyboard layouts have changed
   if (m_keyState->didGroupsChange()) {
     updateKeys();
+  }
+}
+
+void MSWindowsComputer::resetMouseHookCheck()
+{
+  m_hookCheckBaseline = true;
+}
+
+// Windows calls the low level hooks on the desk thread, which also hands the
+// foreground window around when switching. if that thread stalls past
+// LowLevelHooksTimeout, e.g. while a fullscreen game being alt-tabbed is slow
+// to give up the foreground, Windows silently removes the hook that timed
+// out. that's usually the mouse hook, which sees far more events, so the keys
+// still go to the client while the mouse moves this computer's cursor. a
+// later hook from another program that doesn't call the next one hides the
+// mouse from us the same way. there's no notification for either, so watch
+// for the cursor moving without the hook having seen any mouse input.
+void MSWindowsComputer::checkMouseHook()
+{
+  int32_t x = 0;
+  int32_t y = 0;
+  m_desks->getCursorPos(x, y);
+  const bool hookSawMouse = m_hookMouseEvents != m_hookMouseEventsChecked;
+  m_hookMouseEventsChecked = m_hookMouseEvents;
+
+  bool lost = false;
+  if (m_hookCheckBaseline) {
+    m_hookCheckBaseline = false;
+  } else if (m_isOnComputer) {
+    lost = !hookSawMouse && (x != m_hookCheckX || y != m_hookCheckY);
+  } else {
+    // the hook eats all motion while on a client, so the cursor stays where
+    // leave() parked it
+    constexpr int32_t slack = 2;
+    lost = !hookSawMouse && (std::abs(x - m_xCenter) > slack || std::abs(y - m_yCenter) > slack);
+  }
+  m_hookCheckX = x;
+  m_hookCheckY = y;
+  if (!lost || !m_desks->reinstallMouseHook()) {
+    return;
+  }
+
+  ++m_hookLosses;
+  if (const double now = ARCH->time(); now - m_hookLossLoggedAt >= 10.0) {
+    const auto front = foregroundProcessName(m_isOnComputer ? GetForegroundWindow() : m_foregroundAtLeave);
+    if (m_isOnComputer) {
+      LOG_INFO("the mouse hook stopped seeing the mouse (in front: %s); reinstalled it", front.c_str());
+    } else {
+      LOG_INFO(
+          "the mouse hook stopped seeing the mouse while on a client, so it moved this computer's cursor (in front "
+          "when leaving: %s); reinstalled it",
+          front.c_str()
+      );
+    }
+    if (m_hookLosses > 1) {
+      LOG_INFO("the mouse hook was reinstalled %u times since the last report", m_hookLosses);
+    }
+    m_hookLossLoggedAt = now;
+    m_hookLosses = 0;
+  }
+
+  if (!m_isOnComputer) {
+    // the motion that got through took the cursor off the windows hiding it
+    warpCursor(m_xCenter, m_yCenter);
   }
 }
 

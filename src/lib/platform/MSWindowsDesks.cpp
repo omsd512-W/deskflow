@@ -81,6 +81,8 @@
 #define DESKFLOW_MSG_FAKE_REL_MOVE DESKFLOW_HOOK_LAST_MSG + 11
 // enable; <unused>
 #define DESKFLOW_MSG_FAKE_INPUT DESKFLOW_HOOK_LAST_MSG + 12
+// bool* reinstalled; <unused>
+#define DESKFLOW_MSG_REINSTALL_MOUSE_HOOK DESKFLOW_HOOK_LAST_MSG + 13
 
 static void send_keyboard_input(WORD wVk, WORD wScan, DWORD dwFlags)
 {
@@ -258,6 +260,13 @@ void MSWindowsDesks::fakeInputBegin()
 void MSWindowsDesks::fakeInputEnd()
 {
   sendMessage(DESKFLOW_MSG_FAKE_INPUT, 0, 0);
+}
+
+bool MSWindowsDesks::reinstallMouseHook()
+{
+  bool reinstalled = false;
+  sendMessage(DESKFLOW_MSG_REINSTALL_MOUSE_HOOK, reinterpret_cast<WPARAM>(&reinstalled), 0);
+  return reinstalled;
 }
 
 void MSWindowsDesks::getCursorPos(int32_t &x, int32_t &y) const
@@ -830,6 +839,16 @@ void MSWindowsDesks::deskThread(const void *vdesk)
       send_keyboard_input(
           DESKFLOW_HOOK_FAKE_INPUT_VIRTUAL_KEY, DESKFLOW_HOOK_FAKE_INPUT_SCANCODE, msg.wParam ? 0 : KEYEVENTF_KEYUP
       );
+      break;
+
+    case DESKFLOW_MSG_REINSTALL_MOUSE_HOOK:
+      if (m_useHooks && desk->m_lowLevel) {
+        const bool reinstalled = MSWindowsHook::reinstallMouseHook();
+        if (!reinstalled) {
+          LOG_WARN("failed to reinstall the mouse hook, error: %lu", GetLastError());
+        }
+        *reinterpret_cast<bool *>(msg.wParam) = reinstalled;
+      }
       break;
     }
 

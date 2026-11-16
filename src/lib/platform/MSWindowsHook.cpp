@@ -699,6 +699,18 @@ int MSWindowsHook::uninstall()
   return 1;
 }
 
+bool MSWindowsHook::reinstallMouseHook()
+{
+  if (g_mouseLL == nullptr) {
+    return false;
+  }
+
+  // the old handle may already be gone, so a failure here means nothing
+  UnhookWindowsHookEx(g_mouseLL);
+  g_mouseLL = SetWindowsHookEx(WH_MOUSE_LL, &mouseLLHook, nullptr, 0);
+  return g_mouseLL != nullptr;
+}
+
 static LRESULT CALLBACK getMessageHook(int code, WPARAM wParam, LPARAM lParam)
 {
   if (code >= 0) {
