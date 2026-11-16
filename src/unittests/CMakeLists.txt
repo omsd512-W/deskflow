@@ -57,6 +57,7 @@ enable_testing()
 find_package(Qt6 ${REQUIRED_QT_VERSION} REQUIRED COMPONENTS Test)
 
 add_subdirectory(arch)
+add_subdirectory(audio)
 add_subdirectory(base)
 add_subdirectory(client)
 add_subdirectory(common)

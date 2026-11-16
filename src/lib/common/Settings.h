@@ -34,6 +34,19 @@ public:
   inline const static auto UserSettingFile = QStringLiteral("%1/%2.conf").arg(UserDir, kAppName);
   inline const static auto SystemSettingFile = QStringLiteral("%1/%2.conf").arg(SystemDir, kAppName);
 
+  struct Audio
+  {
+    // On the computer whose sound is shared (the client, a Mac).
+    inline static const auto ForwardSystemAudio = QStringLiteral("audio/forwardSystemAudio");
+    inline static const auto KeepLocalPlayback = QStringLiteral("audio/keepLocalPlayback");
+    inline static const auto UseRemoteMicrophone = QStringLiteral("audio/useRemoteMicrophone");
+    // On the computer with the headset (the server).
+    inline static const auto AllowRemotePlayback = QStringLiteral("audio/allowRemotePlayback");
+    inline static const auto AllowMicrophoneSharing = QStringLiteral("audio/allowMicrophoneSharing");
+    inline static const auto OutputDevice = QStringLiteral("audio/outputDevice");
+    inline static const auto InputDevice = QStringLiteral("audio/inputDevice");
+    inline static const auto Port = QStringLiteral("audio/port");
+  };
   struct Client
   {
     inline static const auto DynamicConnectionRetry = QStringLiteral("client/dynamicConnectionInterval");
@@ -265,7 +278,8 @@ private:
 
   // clang-format off
   inline static const QStringList m_validGroup = {
-      QStringLiteral("client")
+      QStringLiteral("audio")
+    , QStringLiteral("client")
     , QStringLiteral("core")
     , QStringLiteral("daemon")
     , QStringLiteral("gui")
@@ -276,7 +290,15 @@ private:
   };
 
   inline static const QStringList m_validKeys = {
-      Client::DynamicConnectionRetry
+      Audio::ForwardSystemAudio
+    , Audio::KeepLocalPlayback
+    , Audio::UseRemoteMicrophone
+    , Audio::AllowRemotePlayback
+    , Audio::AllowMicrophoneSharing
+    , Audio::OutputDevice
+    , Audio::InputDevice
+    , Audio::Port
+    , Client::DynamicConnectionRetry
     , Client::InvertYScroll
     , Client::InvertXScroll
     , Client::LanguageSync
@@ -342,7 +364,10 @@ private:
 
   // When checking the default values this list contains the ones that default to false.
   inline static const QStringList m_defaultFalseValues = {
-      Gui::Autohide
+      Audio::ForwardSystemAudio
+    , Audio::KeepLocalPlayback
+    , Audio::UseRemoteMicrophone
+    , Gui::Autohide
     , Gui::AutoStartCore
     , Gui::ShownFirstConnectedMessage
     , Gui::ShownServerFirstStartMessage
@@ -370,7 +395,9 @@ private:
 
   // When checking the default values this list contains the ones that default to true.
   inline static const QStringList m_defaultTrueValues = {
-      Core::UseHooks
+      Audio::AllowRemotePlayback
+    , Audio::AllowMicrophoneSharing
+    , Core::UseHooks
     , Gui::CloseToTray
     , Gui::CloseReminder
     , Gui::LogExpanded

@@ -11,6 +11,7 @@
 
 #include "gui/config/ServerConfig.h"
 
+class AudioSettingsWidget;
 class SettingsDialogButtonBox;
 
 namespace Ui {
@@ -87,4 +88,5 @@ private:
   std::unique_ptr<Ui::SettingsDialog> ui;
   const ServerConfig &m_serverConfig;
   SettingsDialogButtonBox *m_buttonBox = nullptr;
+  AudioSettingsWidget *m_audio = nullptr;
 };

@@ -65,3 +65,13 @@ path = [
 ]
 SPDX-FileCopyrightText = "Deskflow Developers"
 SPDX-License-Identifier = "GPL-2.0-only WITH LicenseRef-OpenSSL-Exception"
+
+[[annotations]]
+path = "src/lib/audio/third_party/speex/**"
+SPDX-FileCopyrightText = "2002-2008 Xiph.org Foundation, Jean-Marc Valin, Thorvald Natvig"
+SPDX-License-Identifier = "BSD-3-Clause"
+
+[[annotations]]
+path = "src/lib/audio/third_party/miniaudio/**"
+SPDX-FileCopyrightText = "2026 David Reid"
+SPDX-License-Identifier = "MIT-0"

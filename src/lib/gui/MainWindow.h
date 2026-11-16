@@ -17,6 +17,7 @@
 
 #include "VersionChecker.h"
 #include "config/ServerConfig.h"
+#include "gui/core/AudioControl.h"
 #include "gui/core/CoreProcess.h"
 #include "gui/core/NetworkMonitor.h"
 #include "net/Fingerprint.h"
@@ -26,6 +27,7 @@
 #endif
 
 class QAction;
+class QLabel;
 class QMenu;
 class QLocalServer;
 
@@ -172,6 +174,8 @@ private:
   bool m_clientErrorVisible = false;
   ServerConfig m_serverConfig;
   deskflow::gui::CoreProcess m_coreProcess;
+  deskflow::gui::AudioControl *m_audioControl = nullptr;
+  QLabel *m_lblAudio = nullptr;
   QSet<QString> m_ignoredClients;
   bool m_newClientPromptShowing = false;
   bool m_serverConfigDialogVisible = false;

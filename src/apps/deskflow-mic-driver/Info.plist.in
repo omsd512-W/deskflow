@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSHumanReadableCopyright</key><string>@CMAKE_PROJECT_COPYRIGHT@</string>
+  <key>CFBundleExecutable</key><string>DeskflowMicrophone</string>
+  <key>CFBundleIdentifier</key><string>org.deskflow.microphone.driver</string>
+  <key>CFBundleName</key><string>Deskflow Microphone</string>
+  <key>CFBundlePackageType</key><string>BNDL</string>
+  <key>CFBundleShortVersionString</key><string>@CMAKE_PROJECT_VERSION@</string>
+  <key>CFBundleVersion</key><string>@CMAKE_PROJECT_VERSION@</string>
+  <key>CFPlugInFactories</key>
+  <dict>
+    <key>4814DF91-7066-4F49-AD6B-EC4200B7DCDF</key><string>DeskflowMicrophoneFactory</string>
+  </dict>
+  <key>CFPlugInTypes</key>
+  <dict>
+    <key>443ABAB8-E7B3-491A-B985-BEB9187030DB</key>
+    <array><string>4814DF91-7066-4F49-AD6B-EC4200B7DCDF</string></array>
+  </dict>
+  <key>AudioServerPlugIn_MachServices</key><array/>
+  <key>AudioServerPlugIn_Network</key><false/>
+  <key>sandboxSafe</key><true/>
+</dict>
+</plist>

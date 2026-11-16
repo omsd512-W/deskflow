@@ -38,6 +38,10 @@ add_library(${target} STATIC
   config/ComputerList.h
   config/ServerConfig.cpp
   config/ServerConfig.h
+  core/AudioControl.cpp
+  core/AudioControl.h
+  core/AudioProcess.cpp
+  core/AudioProcess.h
   core/CoreProcess.cpp
   core/CoreProcess.h
   core/NetworkMonitor.cpp
@@ -93,6 +97,8 @@ add_library(${target} STATIC
   validators/ValidationError.h
   validators/IpAddressValidator.cpp
   validators/IpAddressValidator.h
+  widgets/AudioSettingsWidget.cpp
+  widgets/AudioSettingsWidget.h
   widgets/ComputerLayoutView.cpp
   widgets/ComputerLayoutView.h
   widgets/FingerprintPreview.cpp

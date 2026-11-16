@@ -38,6 +38,7 @@
 #include <QFileDialog>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -60,6 +61,7 @@ using namespace deskflow::gui;
 MainWindow::MainWindow()
     : ui{std::make_unique<Ui::MainWindow>()},
       m_coreProcess(m_serverConfig),
+      m_audioControl{new AudioControl(this)},
       m_trayIcon{new QSystemTrayIcon(this)},
       m_guiDupeChecker{new QLocalServer(this)},
       m_daemonIpcClient{new ipc::DaemonIpcClient(this)},
@@ -229,6 +231,9 @@ void MainWindow::setupControls()
     ui->btnSaveServerConfig->setIconSize(QSize(22, 22));
   }
   setStatusBar(m_statusBar);
+  m_lblAudio = new QLabel(m_statusBar);
+  m_lblAudio->setVisible(false);
+  m_statusBar->addPermanentWidget(m_lblAudio);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -255,6 +260,12 @@ void MainWindow::connectSlots()
       &m_coreProcess, &CoreProcess::daemonIpcClientConnectionFailed, this, &MainWindow::daemonIpcClientConnectionFailed
   );
   connect(&m_coreProcess, &CoreProcess::securityLevelChanged, m_statusBar, &StatusBar::setSecurityLevel);
+
+  connect(m_audioControl, &AudioControl::logLine, this, &MainWindow::handleLogLine);
+  connect(m_audioControl, &AudioControl::summaryChanged, this, [this](const QString &summary) {
+    m_lblAudio->setText(summary);
+    m_lblAudio->setVisible(!summary.isEmpty());
+  });
 
   connect(m_actionAbout, &QAction::triggered, this, &MainWindow::openAboutDialog);
   connect(m_actionMinimize, &QAction::triggered, this, &MainWindow::hide);
@@ -676,6 +687,7 @@ void MainWindow::createMenuBar()
   menuBar->addMenu(m_menuFile);
   menuBar->addMenu(m_menuEdit);
   menuBar->addMenu(m_menuView);
+  menuBar->addMenu(m_audioControl->menu());
   menuBar->addMenu(m_menuHelp);
 
   setMenuBar(menuBar);
@@ -687,6 +699,8 @@ void MainWindow::setupTrayIcon()
   trayMenu->addActions(
       {m_actionStartCore, m_actionRestartCore, m_actionStopCore, m_actionMinimize, m_actionRestore, m_actionTrayQuit}
   );
+  trayMenu->insertSeparator(m_actionMinimize);
+  trayMenu->insertMenu(m_actionMinimize, m_audioControl->menu());
   trayMenu->insertSeparator(m_actionMinimize);
   trayMenu->insertSeparator(m_actionTrayQuit);
   m_trayIcon->setContextMenu(trayMenu);
@@ -948,6 +962,7 @@ void MainWindow::coreProcessStateChanged(ProcessState state)
 {
   using enum ProcessState;
   updateStatus();
+  m_audioControl->setCoreRunning(state == Started || state == Starting || state == RetryPending);
   if (state == Started) {
     qDebug() << "recording that core has started";
     Settings::setValue(Settings::Gui::AutoStartCore, true);
@@ -1067,6 +1082,7 @@ void MainWindow::updateText()
   m_actionAbout->setText(tr("About %1...").arg(kAppName));
 
   m_actionShowHelp->setText(tr("View &Help"));
+  m_audioControl->retranslate();
 
   //: start / restart core shortcut
   m_actionStartCore->setShortcut(QKeySequence(tr("Ctrl+S")));

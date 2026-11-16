@@ -45,6 +45,12 @@
 	<key>com.apple.security.networking.local</key>
 	<true/>
 
+	<!-- Audio sharing: deskflow-audio, started by this app, records what the Mac plays -->
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Deskflow forwards the sound this Mac plays to the computer with your headset, when you turn on audio sharing.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Deskflow shares this computer's microphone with another Deskflow computer, when you turn on microphone sharing.</string>
+
 	<!-- Accessibility Entitlements -->
 	<key>com.apple.security.accessibility</key>
 	<array>

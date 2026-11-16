@@ -136,6 +136,66 @@ p, li { white-space: pre-wrap; }
     </message>
 </context>
 <context>
+    <name>AudioSettingsWidget</name>
+    <message>
+        <source>When this computer is a client</source>
+        <translation>本机作为客户端时</translation>
+    </message>
+    <message>
+        <source>Play this computer&apos;s sound on the server</source>
+        <translation>在服务端播放本机的声音</translation>
+    </message>
+    <message>
+        <source>Keep playing it on this computer too</source>
+        <translation>本机也继续播放</translation>
+    </message>
+    <message>
+        <source>Use the server&apos;s microphone (appears as the input &quot;Deskflow 麦克风&quot;)</source>
+        <translation>使用服务端的麦克风（显示为输入设备「Deskflow 麦克风」）</translation>
+    </message>
+    <message>
+        <source>The Deskflow microphone driver is not installed, so the server&apos;s microphone cannot appear on this computer.</source>
+        <translation>没有安装 Deskflow 麦克风驱动，服务端的麦克风无法出现在本机。</translation>
+    </message>
+    <message>
+        <source>When this computer is the server</source>
+        <translation>本机作为服务端时</translation>
+    </message>
+    <message>
+        <source>Play sound sent by clients</source>
+        <translation>播放客户端送来的声音</translation>
+    </message>
+    <message>
+        <source>Play on</source>
+        <translation>播放设备</translation>
+    </message>
+    <message>
+        <source>Let clients use this computer&apos;s microphone</source>
+        <translation>允许客户端使用本机的麦克风</translation>
+    </message>
+    <message>
+        <source>Record from</source>
+        <translation>录音设备</translation>
+    </message>
+    <message>
+        <source>System default</source>
+        <translation>系统默认</translation>
+    </message>
+    <message>
+        <source>Audio port</source>
+        <translation>音频端口</translation>
+    </message>
+    <message>
+        <source>Sound and microphone audio travel encrypted over TCP and UDP on the audio port, which the server&apos;s firewall must allow. They only go to computers Deskflow already trusts.</source>
+        <translation>声音和麦克风经音频端口的 TCP 和 UDP 加密传输，服务端的防火墙需要放行这个端口。只会发给 Deskflow 已经信任的电脑。</translation>
+    </message>
+    <message>
+        <source>%1 (not connected)</source>
+        <extracomment>A saved audio device that is not connected right now</extracomment>
+        <translation>%1（未连接）</translation>
+    </message>
+</context>
+<context>
     <name>ClientConfigDialog</name>
     <message>
         <source>Client Configuration</source>
@@ -1219,6 +1279,10 @@ Enabling this setting will disable the server config GUI.</source>
         <translation>语言</translation>
     </message>
     <message>
+        <source>A&amp;udio</source>
+        <translation>音频(&amp;U)</translation>
+    </message>
+    <message>
         <source>TLS Certificate Regenerated</source>
         <translation>TLS 证书已重新生成</translation>
     </message>
@@ -1428,6 +1492,101 @@ Enabling this setting will disable the server config GUI.</source>
     <message>
         <source>Encryption Disabled</source>
         <translation>加密已禁用</translation>
+    </message>
+</context>
+<context>
+    <name>deskflow::gui::AudioControl</name>
+    <message>
+        <source>&amp;Audio</source>
+        <translation>音频(&amp;A)</translation>
+    </message>
+    <message>
+        <source>Play this computer&apos;s sound on the server</source>
+        <extracomment>Switch A: the Mac&apos;s sound plays on the server&apos;s headset</extracomment>
+        <translation>在服务端播放本机的声音</translation>
+    </message>
+    <message>
+        <source>Keep playing it here too</source>
+        <extracomment>Switch B: keep the Mac&apos;s own speakers playing as well</extracomment>
+        <translation>本机也继续播放</translation>
+    </message>
+    <message>
+        <source>Use the server&apos;s microphone</source>
+        <extracomment>Switch C: the server&apos;s microphone appears on this Mac as an input device</extracomment>
+        <translation>使用服务端的麦克风</translation>
+    </message>
+    <message>
+        <source>Play sound sent by clients</source>
+        <translation>播放客户端送来的声音</translation>
+    </message>
+    <message>
+        <source>Share this computer&apos;s microphone with clients</source>
+        <translation>把本机麦克风共享给客户端</translation>
+    </message>
+    <message>
+        <source>Audio sharing is off</source>
+        <translation>音频共享已关闭</translation>
+    </message>
+    <message>
+        <source>Audio: starting</source>
+        <translation>音频：正在启动</translation>
+    </message>
+    <message>
+        <source>waiting for the server</source>
+        <translation>等待服务端</translation>
+    </message>
+    <message>
+        <source>sound on %1</source>
+        <translation>声音在 %1 播放</translation>
+    </message>
+    <message>
+        <source>%1 is not playing sound</source>
+        <translation>%1 没有播放声音</translation>
+    </message>
+    <message>
+        <source>sound not reaching %1, playing here</source>
+        <translation>声音没到 %1，改在本机播放</translation>
+    </message>
+    <message>
+        <source>cannot record this computer&apos;s sound</source>
+        <translation>无法录制本机声音</translation>
+    </message>
+    <message>
+        <source>microphone of %1</source>
+        <translation>%1 的麦克风</translation>
+    </message>
+    <message>
+        <source>microphone driver not installed</source>
+        <translation>麦克风驱动未安装</translation>
+    </message>
+    <message>
+        <source>playing sound from %1</source>
+        <translation>正在播放 %1 的声音</translation>
+    </message>
+    <message>
+        <source>cannot play sound</source>
+        <translation>无法播放声音</translation>
+    </message>
+    <message>
+        <source>connected to %1</source>
+        <translation>已连接 %1</translation>
+    </message>
+    <message>
+        <source>waiting for a client</source>
+        <translation>等待客户端</translation>
+    </message>
+    <message>
+        <source>microphone shared</source>
+        <translation>麦克风已共享</translation>
+    </message>
+    <message>
+        <source>cannot record the microphone</source>
+        <translation>无法录制麦克风</translation>
+    </message>
+    <message>
+        <source>Audio: %1</source>
+        <extracomment>Status bar text, followed by a list such as &quot;sound on Windows-PC (35 ms)&quot;</extracomment>
+        <translation>音频：%1</translation>
     </message>
 </context>
 <context>

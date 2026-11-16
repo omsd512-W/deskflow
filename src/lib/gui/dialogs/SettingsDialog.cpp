@@ -15,6 +15,7 @@
 #include "common/Settings.h"
 #include "gui/TlsUtility.h"
 #include "gui/core/NetworkMonitor.h"
+#include "gui/widgets/AudioSettingsWidget.h"
 #include "gui/widgets/SettingsDialogButtonBox.h"
 
 #include <QComboBox>
@@ -33,6 +34,8 @@ SettingsDialog::SettingsDialog(QWidget *parent, const ServerConfig &serverConfig
 
   ui->setupUi(this);
   layout()->addWidget(m_buttonBox);
+  m_audio = new AudioSettingsWidget(ui->tabWidget);
+  ui->tabWidget->insertTab(ui->tabWidget->indexOf(ui->tabAdvanced), m_audio, tr("A&udio"));
   ui->tabWidget->setCurrentIndex(0);
 
   // these are enabled by the control next to them
@@ -90,6 +93,8 @@ void SettingsDialog::changeEvent(QEvent *e)
   QDialog::changeEvent(e);
   if (e->type() == QEvent::LanguageChange) {
     ui->retranslateUi(this);
+    ui->tabWidget->setTabText(ui->tabWidget->indexOf(m_audio), tr("A&udio"));
+    m_audio->retranslate();
     updateText();
   }
 }
@@ -119,6 +124,7 @@ void SettingsDialog::initConnections() const
   });
 
   // Connect modifiable controls
+  connect(m_audio, &AudioSettingsWidget::changed, this, &SettingsDialog::setButtonBoxEnabledButtons);
   connect(ui->rbIconMono, &QRadioButton::toggled, this, &SettingsDialog::setButtonBoxEnabledButtons);
   connect(ui->sbPort, &QSpinBox::valueChanged, this, &SettingsDialog::setButtonBoxEnabledButtons);
   connect(ui->comboLogLevel, &QComboBox::currentIndexChanged, this, &SettingsDialog::setButtonBoxEnabledButtons);
@@ -221,6 +227,7 @@ void SettingsDialog::updateText()
 void SettingsDialog::accept()
 {
   Settings::setValue(Settings::Core::Port, ui->sbPort->value());
+  m_audio->save();
   Settings::setValue(Settings::Core::Interface, ui->comboInterface->currentData());
   Settings::setValue(Settings::Log::Level, ui->comboLogLevel->currentData());
   Settings::setValue(Settings::Log::ToFile, ui->groupLogToFile->isChecked());
@@ -301,6 +308,8 @@ void SettingsDialog::loadFromConfig()
   } else {
     m_interfaceSetOnLoad = true;
   }
+
+  m_audio->load();
 
   qDebug() << "load from config done";
 
@@ -446,6 +455,7 @@ bool SettingsDialog::isModified() const
       (ui->lineCommandExit->text() != Settings::value(Settings::Core::ComputerExitCommand).toString()) ||
       (I18N::nativeTo639Name(ui->comboLanguage->currentText()) != Settings::value(Settings::Core::Language).toString());
 
+  modified = modified || m_audio->isModified();
   if (!ignoreInterface)
     modified = modified || ui->comboInterface->currentText() != Settings::value(Settings::Core::Interface).toString();
   return modified;
@@ -480,7 +490,7 @@ bool SettingsDialog::isDefault() const
       (ui->lineCommandExit->text() == Settings::defaultValue(Settings::Core::ComputerExitCommand).toString()) &&
       (ui->cbRunEnterCommand->isChecked() == Settings::defaultValue(Settings::Core::EnableEnterCommand).toBool()) &&
       (ui->cbRunExitCommand->isChecked() == Settings::defaultValue(Settings::Core::EnableExitCommand).toBool()) &&
-      (ui->comboLanguage->currentText() == "English")
+      (ui->comboLanguage->currentText() == "English") && m_audio->isDefault()
   );
 }
 
@@ -524,6 +534,7 @@ void SettingsDialog::resetToDefault()
   ui->lblDebugWarning->setVisible(false);
 
   ui->comboInterface->setCurrentIndex(0);
+  m_audio->resetToDefault();
 
   qDebug() << "reset to default values";
   updateControls();
