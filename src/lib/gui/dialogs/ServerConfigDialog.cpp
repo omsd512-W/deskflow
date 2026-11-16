@@ -24,23 +24,50 @@
 #include <QScreen>
 #include <QMessageBox>
 
+#if defined(Q_OS_WIN)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 using enum ComputerConfig::SwitchCorner;
 
 namespace {
 
-// The server's monitors in desktop pixels. The dialog only runs on the server, so these are the monitors the
-// core switches on. Positions are only exact when every monitor uses the same scale factor.
+// The server's monitors in the coordinates the core switches on. The dialog only runs on the server.
 QList<QRect> localMonitors()
 {
   QList<QRect> monitors;
+#if defined(Q_OS_WIN)
+  // Ask Windows directly, like the core does: physical pixels for every monitor. Qt's screen geometry
+  // keeps each monitor's native top left but scales its size, so with mixed scale factors it can't be
+  // turned back into desktop pixels (a 125% monitor would land a quarter of its position away).
+  EnumDisplayMonitors(
+      nullptr, nullptr,
+      [](HMONITOR, HDC, LPRECT rect, LPARAM data) -> BOOL {
+        reinterpret_cast<QList<QRect> *>(data)->append(
+            QRect(rect->left, rect->top, rect->right - rect->left, rect->bottom - rect->top)
+        );
+        return TRUE;
+      },
+      reinterpret_cast<LPARAM>(&monitors)
+  );
+#else
   for (const auto *screen : QGuiApplication::screens()) {
     const auto geometry = screen->geometry();
+#if defined(Q_OS_MACOS)
+    // Points, as the core uses (CGDisplayBounds).
+    monitors.append(geometry);
+#else
+    // Qt keeps the native top left and scales only the size.
     const auto ratio = screen->devicePixelRatio();
-    monitors.append(QRect(
-        qRound(geometry.x() * ratio), qRound(geometry.y() * ratio), qRound(geometry.width() * ratio),
-        qRound(geometry.height() * ratio)
-    ));
+    monitors.append(
+        QRect(geometry.topLeft(), QSize(qRound(geometry.width() * ratio), qRound(geometry.height() * ratio)))
+    );
+#endif
   }
+#endif
   return monitors;
 }
 
