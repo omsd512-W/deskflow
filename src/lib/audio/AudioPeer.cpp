@@ -32,7 +32,7 @@ AudioPeer::AudioPeer(PeerConfig config, QObject *parent) : QObject(parent), m_co
   m_reconnectTimer.setSingleShot(true);
   connect(&m_reconnectTimer, &QTimer::timeout, this, &AudioPeer::connectToServer);
   m_pingTimer.setInterval(1000);
-  connect(&m_pingTimer, &QTimer::timeout, this, &AudioPeer::sendPing);
+  connect(&m_pingTimer, &QTimer::timeout, this, qOverload<>(&AudioPeer::sendPing));
   m_statsTimer.setInterval(1000);
   connect(&m_statsTimer, &QTimer::timeout, this, &AudioPeer::sendStats);
 }
@@ -56,9 +56,13 @@ bool AudioPeer::start(QString *error)
     m_server = new QTcpServer(this);
     connect(m_server, &QTcpServer::newConnection, this, [this] {
       while (auto *socket = m_server->nextPendingConnection()) {
-        if (m_channel) {
-          log(QStringLiteral("a new client replaces the current connection"));
-          m_channel->close(QStringLiteral("replaced"));
+        if (int(m_links.size()) >= kMaxLinks) {
+          log(QStringLiteral("turning away %1, already serving %2 computers")
+                  .arg(socket->peerAddress().toString())
+                  .arg(kMaxLinks));
+          socket->abort();
+          socket->deleteLater();
+          continue;
         }
         attachChannel(socket, true);
       }
@@ -83,8 +87,15 @@ void AudioPeer::stop()
   m_reconnectTimer.stop();
   m_pingTimer.stop();
   m_statsTimer.stop();
-  if (m_channel) {
-    m_channel->close(QStringLiteral("stopping"));
+  // Closing a channel removes its link, so close a copy.
+  std::vector<TlsChannel *> channels;
+  for (const auto &[id, link] : m_links) {
+    if (link->channel) {
+      channels.push_back(link->channel);
+    }
+  }
+  for (auto *channel : channels) {
+    channel->close(QStringLiteral("stopping"));
   }
   if (m_server) {
     m_server->close();
@@ -95,40 +106,152 @@ void AudioPeer::stop()
   }
   {
     std::lock_guard lock(m_mutex);
-    m_send.clear();
-    m_incoming.clear();
+    m_links.clear();
   }
   if (m_udp) {
     m_udp->close();
   }
 }
 
+std::shared_ptr<AudioPeer::Link> AudioPeer::link(int id) const
+{
+  std::lock_guard lock(m_mutex);
+  const auto it = m_links.find(id);
+  return it == m_links.end() ? nullptr : it->second;
+}
+
+std::shared_ptr<AudioPeer::Link> AudioPeer::firstLink() const
+{
+  std::lock_guard lock(m_mutex);
+  for (const auto &[id, link] : m_links) {
+    if (link->connected) {
+      return link;
+    }
+  }
+  return nullptr;
+}
+
+std::vector<int> AudioPeer::links() const
+{
+  std::vector<int> ids;
+  std::lock_guard lock(m_mutex);
+  for (const auto &[id, link] : m_links) {
+    if (link->connected) {
+      ids.push_back(id);
+    }
+  }
+  return ids;
+}
+
+QString AudioPeer::peerName() const
+{
+  const auto first = firstLink();
+  return first ? first->name : QString();
+}
+
+QString AudioPeer::peerName(int id) const
+{
+  const auto found = link(id);
+  return found ? found->name : QString();
+}
+
+int AudioPeer::linkNamed(const QString &name) const
+{
+  std::lock_guard lock(m_mutex);
+  for (const auto &[id, link] : m_links) {
+    if (link->connected && link->name == name) {
+      return id;
+    }
+  }
+  return -1;
+}
+
+double AudioPeer::roundTripMs() const
+{
+  const auto first = firstLink();
+  return first ? first->roundTripMs : 0;
+}
+
+double AudioPeer::roundTripMs(int id) const
+{
+  const auto found = link(id);
+  return found ? found->roundTripMs : 0;
+}
+
+std::optional<std::int64_t> AudioPeer::clockOffsetUs() const
+{
+  const auto first = firstLink();
+  return first ? first->clockOffsetUs : std::nullopt;
+}
+
+std::optional<std::int64_t> AudioPeer::clockOffsetUs(int id) const
+{
+  const auto found = link(id);
+  return found ? found->clockOffsetUs : std::nullopt;
+}
+
 void AudioPeer::setSending(StreamKind kind, bool enabled)
 {
   if (enabled) {
     m_sending.insert(kind);
-    if (m_connected && !sendStream(kind)) {
-      openSendStream(kind);
-    }
   } else {
     m_sending.erase(kind);
-    if (m_connected) {
-      closeSendStream(kind);
+  }
+  for (const auto id : links()) {
+    setSending(id, kind, enabled);
+  }
+}
+
+void AudioPeer::setSending(int id, StreamKind kind, bool enabled)
+{
+  const auto found = link(id);
+  if (!found) {
+    return;
+  }
+  if (enabled) {
+    found->sending.insert(kind);
+    if (found->connected && !sendStream(id, kind)) {
+      openSendStream(*found, kind);
+    }
+  } else {
+    found->sending.erase(kind);
+    if (found->connected) {
+      closeSendStream(*found, kind);
     }
   }
 }
 
 std::shared_ptr<SendStream> AudioPeer::sendStream(StreamKind kind) const
 {
+  const auto first = firstLink();
+  return first ? sendStream(first->id, kind) : nullptr;
+}
+
+std::shared_ptr<SendStream> AudioPeer::sendStream(int id, StreamKind kind) const
+{
   std::lock_guard lock(m_mutex);
-  const auto it = m_send.find(kind);
-  return it == m_send.end() ? nullptr : it->second;
+  const auto it = m_links.find(id);
+  if (it == m_links.end()) {
+    return nullptr;
+  }
+  const auto stream = it->second->send.find(kind);
+  return stream == it->second->send.end() ? nullptr : stream->second;
 }
 
 std::shared_ptr<ReceiveStream> AudioPeer::receiveStream(StreamKind kind) const
 {
+  const auto first = firstLink();
+  return first ? receiveStream(first->id, kind) : nullptr;
+}
+
+std::shared_ptr<ReceiveStream> AudioPeer::receiveStream(int id, StreamKind kind) const
+{
   std::lock_guard lock(m_mutex);
-  for (const auto &[id, incoming] : m_incoming) {
+  const auto it = m_links.find(id);
+  if (it == m_links.end()) {
+    return nullptr;
+  }
+  for (const auto &[streamId, incoming] : it->second->incoming) {
     if (incoming->kind == kind) {
       return incoming->stream;
     }
@@ -138,15 +261,38 @@ std::shared_ptr<ReceiveStream> AudioPeer::receiveStream(StreamKind kind) const
 
 QJsonObject AudioPeer::remoteStats(StreamKind kind) const
 {
+  const auto first = firstLink();
+  return first ? remoteStats(first->id, kind) : QJsonObject{};
+}
+
+QJsonObject AudioPeer::remoteStats(int id, StreamKind kind) const
+{
   std::lock_guard lock(m_mutex);
-  const auto it = m_remoteStats.find(kind);
-  return it == m_remoteStats.end() ? QJsonObject{} : it->second;
+  const auto it = m_links.find(id);
+  if (it == m_links.end()) {
+    return {};
+  }
+  const auto stats = it->second->remoteStats.find(kind);
+  return stats == it->second->remoteStats.end() ? QJsonObject{} : stats->second;
 }
 
 void AudioPeer::sendDemand(StreamKind kind, bool active)
 {
-  if (m_channel && m_connected) {
-    m_channel->send(protocol::demand(kind, active));
+  for (const auto id : links()) {
+    sendDemand(id, kind, active);
+  }
+}
+
+void AudioPeer::sendDemand(int id, StreamKind kind, bool active)
+{
+  sendMessage(id, protocol::demand(kind, active));
+}
+
+void AudioPeer::sendMessage(int id, const QJsonObject &message)
+{
+  const auto found = link(id);
+  if (found && found->connected && found->channel) {
+    found->channel->send(message);
   }
 }
 
@@ -158,7 +304,7 @@ AudioPeer::DatagramCounters AudioPeer::datagramCounters() const
 
 void AudioPeer::connectToServer()
 {
-  if (m_channel || m_connecting) {
+  if (!m_links.empty() || m_connecting) {
     return;
   }
   m_connecting = new QTcpSocket(this);
@@ -203,18 +349,25 @@ void AudioPeer::scheduleReconnect()
 void AudioPeer::attachChannel(QTcpSocket *socket, bool server)
 {
   socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
-  m_channel = new TlsChannel(socket, server ? TlsChannel::Mode::Server : TlsChannel::Mode::Client, this);
-  auto *channel = m_channel;
-  connect(channel, &TlsChannel::ready, this, &AudioPeer::onChannelReady);
-  connect(channel, &TlsChannel::messageReceived, this, &AudioPeer::onMessage);
-  connect(channel, &TlsChannel::closed, this, [this, channel](const QString &reason) {
-    if (m_channel == channel) {
-      onChannelClosed(reason);
-    }
-    channel->deleteLater();
+  auto added = std::make_shared<Link>();
+  added->id = m_nextLinkId++;
+  added->sending = m_sending;
+  added->channel = new TlsChannel(socket, server ? TlsChannel::Mode::Server : TlsChannel::Mode::Client, this);
+  const int id = added->id;
+  auto *channel = added->channel;
+  {
+    std::lock_guard lock(m_mutex);
+    m_links[id] = added;
+  }
+  connect(channel, &TlsChannel::ready, this, [this, id] { onChannelReady(id); });
+  connect(channel, &TlsChannel::messageReceived, this, [this, id](const QJsonObject &message) {
+    onMessage(id, message);
   });
-  QTimer::singleShot(kHandshakeTimeoutMs, channel, [this, channel] {
-    if (m_channel == channel && !m_connected) {
+  connect(channel, &TlsChannel::closed, this, [this, id](const QString &reason) { onChannelClosed(id, reason); });
+  connect(channel, &TlsChannel::closed, channel, &QObject::deleteLater);
+  QTimer::singleShot(kHandshakeTimeoutMs, channel, [this, id, channel] {
+    const auto found = link(id);
+    if (found && found->channel == channel && !found->connected) {
       channel->close(QStringLiteral("handshake timed out"));
     }
   });
@@ -225,51 +378,84 @@ void AudioPeer::attachChannel(QTcpSocket *socket, bool server)
   }
 }
 
-void AudioPeer::onChannelReady()
+void AudioPeer::onChannelReady(int id)
 {
-  const auto digest = m_channel->peerSha256();
-  if (!isTrusted(digest)) {
-    log(QStringLiteral("rejecting peer with untrusted certificate %1").arg(deskflow::formatSSLFingerprint(digest)));
-    m_channel->close(QStringLiteral("untrusted peer"));
+  const auto found = link(id);
+  if (!found || !found->channel) {
     return;
   }
-  m_channel->send(protocol::hello(m_config.name, m_udp->localPort()));
+  const auto digest = found->channel->peerSha256();
+  if (!isTrusted(digest)) {
+    log(QStringLiteral("rejecting peer with untrusted certificate %1").arg(deskflow::formatSSLFingerprint(digest)));
+    found->channel->close(QStringLiteral("untrusted peer"));
+    return;
+  }
+  found->channel->send(protocol::hello(m_config.name, m_udp->localPort()));
 }
 
-void AudioPeer::onMessage(const QJsonObject &message)
+void AudioPeer::onHello(Link &link, const QJsonObject &message)
 {
-  m_lastHeard.restart();
+  const auto hello = protocol::parseHello(message);
+  if (!hello || hello->version != protocol::kVersion) {
+    link.channel->close(QStringLiteral("incompatible peer"));
+    return;
+  }
+  // The same computer coming back (after sleep, say) replaces its old link.
+  if (m_config.role == PeerConfig::Role::Server && !hello->name.isEmpty()) {
+    std::vector<TlsChannel *> stale;
+    for (const auto &[id, other] : m_links) {
+      if (id != link.id && other->connected && other->name == hello->name && other->channel) {
+        stale.push_back(other->channel);
+      }
+    }
+    for (auto *channel : stale) {
+      log(QStringLiteral("%1 connected again, dropping its old connection").arg(hello->name));
+      channel->close(QStringLiteral("replaced"));
+    }
+  }
+  link.name = hello->name;
+  link.address = link.channel->socket()->peerAddress();
+  link.udpPort = hello->udpPort;
+  link.connected = true;
+  log(QStringLiteral("connected to %1 (%2, UDP %3)").arg(link.name, link.address.toString()).arg(link.udpPort));
+  for (const auto kind : link.sending) {
+    openSendStream(link, kind);
+  }
+  link.clockSamples.clear();
+  link.clockOffsetUs.reset();
+  if (!m_pingTimer.isActive()) {
+    m_pingTimer.start();
+    m_statsTimer.start();
+  }
+  // A quick burst gives a usable clock offset within a second.
+  const int id = link.id;
+  for (int i = 0; i < 5; ++i) {
+    QTimer::singleShot(i * 100, this, [this, id] {
+      if (const auto found = this->link(id); found && found->connected) {
+        sendPing(*found);
+      }
+    });
+  }
+  Q_EMIT linkConnected(id);
+  Q_EMIT connected();
+}
+
+void AudioPeer::onMessage(int id, const QJsonObject &message)
+{
+  const auto found = link(id);
+  if (!found || !found->channel) {
+    return;
+  }
+  auto &link = *found;
+  link.lastHeard.restart();
   const auto type = message.value(protocol::kType).toString();
 
   if (type == protocol::kHello) {
-    const auto hello = protocol::parseHello(message);
-    if (!hello || hello->version != protocol::kVersion) {
-      m_channel->close(QStringLiteral("incompatible peer"));
-      return;
-    }
-    m_peerName = hello->name;
-    m_remoteAddress = m_channel->socket()->peerAddress();
-    m_remoteUdpPort = hello->udpPort;
-    m_connected = true;
-    log(QStringLiteral("connected to %1 (%2, UDP %3)")
-            .arg(m_peerName, m_remoteAddress.toString())
-            .arg(m_remoteUdpPort));
-    for (const auto kind : m_sending) {
-      openSendStream(kind);
-    }
-    m_clockSamples.clear();
-    m_haveClockOffset = false;
-    m_pingTimer.start();
-    m_statsTimer.start();
-    // A quick burst gives a usable clock offset within a second.
-    for (int i = 0; i < 5; ++i) {
-      QTimer::singleShot(i * 100, this, &AudioPeer::sendPing);
-    }
-    Q_EMIT connected();
+    onHello(link, message);
     return;
   }
 
-  if (!m_connected) {
+  if (!link.connected) {
     return;
   }
 
@@ -286,80 +472,89 @@ void AudioPeer::onMessage(const QJsonObject &message)
     incoming->opener = std::make_unique<PacketOpener>(offer->key);
     {
       std::lock_guard lock(m_mutex);
-      for (auto it = m_incoming.begin(); it != m_incoming.end();) {
-        it = (it->second->kind == incoming->kind) ? m_incoming.erase(it) : std::next(it);
+      for (auto it = link.incoming.begin(); it != link.incoming.end();) {
+        it = (it->second->kind == incoming->kind) ? link.incoming.erase(it) : std::next(it);
       }
-      m_incoming[offer->id] = incoming;
+      link.incoming[offer->id] = incoming;
     }
-    log(QStringLiteral("receiving %1 audio: %2 ch, %3 ms frames")
-            .arg(QString::fromLatin1(toString(offer->format.kind)))
+    log(QStringLiteral("receiving %1 audio from %2: %3 ch, %4 ms frames")
+            .arg(QString::fromLatin1(toString(offer->format.kind)), link.name)
             .arg(offer->format.channels)
             .arg(offer->format.frameMs()));
-    Q_EMIT receiveStreamChanged(offer->format.kind);
+    Q_EMIT receiveStreamChanged(id, offer->format.kind);
   } else if (type == protocol::kStreamClose) {
-    const auto id = std::uint8_t(message.value("id").toInt());
+    const auto streamId = std::uint8_t(message.value("id").toInt());
     std::optional<StreamKind> kind;
     {
       std::lock_guard lock(m_mutex);
-      const auto it = m_incoming.find(id);
-      if (it != m_incoming.end()) {
+      const auto it = link.incoming.find(streamId);
+      if (it != link.incoming.end()) {
         kind = it->second->kind;
-        m_incoming.erase(it);
+        link.incoming.erase(it);
       }
     }
     if (kind) {
-      Q_EMIT receiveStreamChanged(*kind);
+      Q_EMIT receiveStreamChanged(id, *kind);
     }
   } else if (type == protocol::kDemand) {
     const auto kind = protocol::kindFromString(message.value("kind").toString());
     if (kind) {
-      Q_EMIT demandChanged(*kind, message.value("active").toBool());
+      Q_EMIT demandChanged(id, *kind, message.value("active").toBool());
     }
   } else if (type == protocol::kPing) {
-    m_channel->send(protocol::pong(std::int64_t(message.value("t").toDouble()), toMicros(Clock::now())));
+    link.channel->send(protocol::pong(std::int64_t(message.value("t").toDouble()), toMicros(Clock::now())));
   } else if (type == protocol::kPong) {
-    onPong(message);
+    onPong(link, message);
   } else if (type == protocol::kTiming) {
-    const auto id = std::uint8_t(message.value("id").toInt());
+    const auto streamId = std::uint8_t(message.value("id").toInt());
     std::lock_guard lock(m_mutex);
-    if (const auto it = m_incoming.find(id); it != m_incoming.end()) {
+    if (const auto it = link.incoming.find(streamId); it != link.incoming.end()) {
       it->second->mark = SendStream::CaptureMark{
           std::uint32_t(message.value("ts").toDouble()), std::int64_t(message.value("us").toDouble())
       };
     }
   } else if (type == protocol::kStats) {
-    const auto id = std::uint8_t(message.value("id").toInt());
+    const auto streamId = std::uint8_t(message.value("id").toInt());
     std::lock_guard lock(m_mutex);
-    for (const auto &[kind, stream] : m_send) {
-      if (stream->id() == id) {
-        m_remoteStats[kind] = message;
+    for (const auto &[kind, stream] : link.send) {
+      if (stream->id() == streamId) {
+        link.remoteStats[kind] = message;
       }
     }
+  } else {
+    Q_EMIT messageReceived(id, message);
   }
 }
 
-void AudioPeer::onChannelClosed(const QString &reason)
+void AudioPeer::onChannelClosed(int id, const QString &reason)
 {
-  const bool wasConnected = m_connected;
-  m_connected = false;
-  m_channel = nullptr;
-  m_pingTimer.stop();
-  m_statsTimer.stop();
-  std::set<StreamKind> removed;
+  std::shared_ptr<Link> removed;
   {
     std::lock_guard lock(m_mutex);
-    m_send.clear();
-    for (const auto &[id, incoming] : m_incoming) {
-      removed.insert(incoming->kind);
+    const auto it = m_links.find(id);
+    if (it == m_links.end()) {
+      return;
     }
-    m_incoming.clear();
-    m_remoteStats.clear();
+    removed = it->second;
+    m_links.erase(it);
   }
-  for (const auto kind : removed) {
-    Q_EMIT receiveStreamChanged(kind);
+  removed->channel = nullptr;
+  std::set<StreamKind> kinds;
+  for (const auto &[streamId, incoming] : removed->incoming) {
+    kinds.insert(incoming->kind);
   }
-  log(QStringLiteral("disconnected: %1").arg(reason));
-  if (wasConnected) {
+  for (const auto kind : kinds) {
+    Q_EMIT receiveStreamChanged(id, kind);
+  }
+  if (m_links.empty()) {
+    m_pingTimer.stop();
+    m_statsTimer.stop();
+  }
+  // audio-soak-report.py counts lines starting "disconnected: ".
+  log(removed->name.isEmpty() ? QStringLiteral("disconnected: %1").arg(reason)
+                              : QStringLiteral("disconnected: %1 (%2)").arg(reason, removed->name));
+  if (removed->connected) {
+    Q_EMIT linkDisconnected(id, reason);
     Q_EMIT disconnected(reason);
   }
   scheduleReconnect();
@@ -384,13 +579,13 @@ bool AudioPeer::isTrusted(const QByteArray &sha256) const
   return database.isTrusted(fingerprint);
 }
 
-void AudioPeer::openSendStream(StreamKind kind)
+void AudioPeer::openSendStream(Link &link, StreamKind kind)
 {
   const auto format = defaultFormat(kind);
   const auto id = std::uint8_t(kind);
   const auto key = StreamKey::generate();
-  SendStream::Transmit transmit = [udp = m_udp, address = m_remoteAddress,
-                                   port = m_remoteUdpPort](const std::uint8_t *data, int size) {
+  SendStream::Transmit transmit = [udp = m_udp, address = link.address,
+                                   port = link.udpPort](const std::uint8_t *data, int size) {
     udp->sendTo(data, size, address, port);
   };
   if (m_config.wrapTransmit) {
@@ -399,75 +594,90 @@ void AudioPeer::openSendStream(StreamKind kind)
   auto stream = std::make_shared<SendStream>(format, id, key, std::move(transmit));
   {
     std::lock_guard lock(m_mutex);
-    m_send[kind] = stream;
+    link.send[kind] = stream;
   }
-  m_channel->send(protocol::streamOffer(id, format, key));
-  log(QStringLiteral("sending %1 audio").arg(QString::fromLatin1(toString(kind))));
+  link.channel->send(protocol::streamOffer(id, format, key));
+  log(QStringLiteral("sending %1 audio to %2").arg(QString::fromLatin1(toString(kind)), link.name));
 }
 
-void AudioPeer::closeSendStream(StreamKind kind)
+void AudioPeer::closeSendStream(Link &link, StreamKind kind)
 {
   std::shared_ptr<SendStream> stream;
   {
     std::lock_guard lock(m_mutex);
-    const auto it = m_send.find(kind);
-    if (it == m_send.end()) {
+    const auto it = link.send.find(kind);
+    if (it == link.send.end()) {
       return;
     }
     stream = it->second;
-    m_send.erase(it);
-    m_remoteStats.erase(kind);
+    link.send.erase(it);
+    link.remoteStats.erase(kind);
   }
-  if (m_channel) {
-    m_channel->send(protocol::streamClose(stream->id()));
+  if (link.channel) {
+    link.channel->send(protocol::streamClose(stream->id()));
   }
 }
 
 void AudioPeer::sendStats()
 {
-  if (!m_channel) {
-    return;
-  }
-  std::vector<std::pair<std::uint8_t, std::shared_ptr<ReceiveStream>>> streams;
-  {
-    std::lock_guard lock(m_mutex);
-    for (const auto &[id, incoming] : m_incoming) {
-      streams.emplace_back(id, incoming->stream);
+  for (const auto id : links()) {
+    const auto found = link(id);
+    if (!found || !found->channel) {
+      continue;
     }
-  }
-  for (const auto &[id, stream] : streams) {
-    auto message = protocol::stats(id, stream->stats());
-    if (const auto latency = latencyMs(stream->format().kind)) {
-      message.insert(QStringLiteral("latencyMs"), *latency);
+    std::vector<std::pair<std::uint8_t, std::shared_ptr<ReceiveStream>>> streams;
+    std::vector<std::shared_ptr<SendStream>> sending;
+    {
+      std::lock_guard lock(m_mutex);
+      for (const auto &[streamId, incoming] : found->incoming) {
+        streams.emplace_back(streamId, incoming->stream);
+      }
+      for (const auto &[kind, stream] : found->send) {
+        sending.push_back(stream);
+      }
     }
-    m_channel->send(message);
-  }
-  std::vector<std::shared_ptr<SendStream>> sending;
-  {
-    std::lock_guard lock(m_mutex);
-    for (const auto &[kind, stream] : m_send) {
-      sending.push_back(stream);
+    for (const auto &[streamId, stream] : streams) {
+      auto message = protocol::stats(streamId, stream->stats());
+      if (const auto latency = latencyMs(id, stream->format().kind)) {
+        message.insert(QStringLiteral("latencyMs"), *latency);
+      }
+      found->channel->send(message);
     }
-  }
-  for (const auto &stream : sending) {
-    if (const auto mark = stream->captureMark()) {
-      m_channel->send(protocol::timing(stream->id(), mark->timestamp, mark->captureUs));
+    for (const auto &stream : sending) {
+      if (const auto mark = stream->captureMark()) {
+        found->channel->send(protocol::timing(stream->id(), mark->timestamp, mark->captureUs));
+      }
     }
   }
 }
 
 void AudioPeer::sendPing()
 {
-  if (m_channel && m_connected && m_lastHeard.isValid() && m_lastHeard.elapsed() > kSilenceTimeoutMs) {
-    m_channel->close(QStringLiteral("no reply for %1 s").arg(m_lastHeard.elapsed() / 1000));
-    return;
+  std::vector<TlsChannel *> silent;
+  for (const auto id : links()) {
+    const auto found = link(id);
+    if (!found || !found->channel) {
+      continue;
+    }
+    if (found->lastHeard.isValid() && found->lastHeard.elapsed() > kSilenceTimeoutMs) {
+      silent.push_back(found->channel);
+      continue;
+    }
+    sendPing(*found);
   }
-  if (m_channel && m_connected) {
-    m_channel->send(protocol::ping(toMicros(Clock::now())));
+  for (auto *channel : silent) {
+    channel->close(QStringLiteral("no reply for %1 s").arg(kSilenceTimeoutMs / 1000));
   }
 }
 
-void AudioPeer::onPong(const QJsonObject &message)
+void AudioPeer::sendPing(Link &link)
+{
+  if (link.channel && link.connected) {
+    link.channel->send(protocol::ping(toMicros(Clock::now())));
+  }
+}
+
+void AudioPeer::onPong(Link &link, const QJsonObject &message)
 {
   // NTP style: the responder's clock read halfway through the round trip.
   const auto sent = std::int64_t(message.value("t").toDouble());
@@ -477,25 +687,17 @@ void AudioPeer::onPong(const QJsonObject &message)
   if (roundTrip < 0) {
     return;
   }
-  m_roundTripMs = roundTrip / 1000.0;
-  m_clockSamples.push_back({roundTrip, peer - (sent + now) / 2});
-  while (m_clockSamples.size() > 16) {
-    m_clockSamples.pop_front();
+  link.roundTripMs = roundTrip / 1000.0;
+  link.clockSamples.push_back({roundTrip, peer - (sent + now) / 2});
+  while (link.clockSamples.size() > 16) {
+    link.clockSamples.pop_front();
   }
   // The quickest exchange has the least room for asymmetric delay.
-  const auto best = std::min_element(m_clockSamples.begin(), m_clockSamples.end(), [](const auto &a, const auto &b) {
-    return a.roundTripUs < b.roundTripUs;
-  });
-  m_clockOffsetUs = best->offsetUs;
-  m_haveClockOffset = true;
-}
-
-std::optional<std::int64_t> AudioPeer::clockOffsetUs() const
-{
-  if (!m_haveClockOffset) {
-    return std::nullopt;
-  }
-  return m_clockOffsetUs.load();
+  const auto best =
+      std::min_element(link.clockSamples.begin(), link.clockSamples.end(), [](const auto &a, const auto &b) {
+        return a.roundTripUs < b.roundTripUs;
+      });
+  link.clockOffsetUs = best->offsetUs;
 }
 
 void AudioPeer::setOutputLatency(StreamKind kind, double ms)
@@ -506,16 +708,23 @@ void AudioPeer::setOutputLatency(StreamKind kind, double ms)
 
 std::optional<double> AudioPeer::latencyMs(StreamKind kind) const
 {
-  const auto offset = clockOffsetUs();
-  if (!offset) {
+  const auto first = firstLink();
+  return first ? latencyMs(first->id, kind) : std::nullopt;
+}
+
+std::optional<double> AudioPeer::latencyMs(int id, StreamKind kind) const
+{
+  const auto found = link(id);
+  if (!found || !found->clockOffsetUs) {
     return std::nullopt;
   }
+  const auto offset = *found->clockOffsetUs;
   std::shared_ptr<ReceiveStream> stream;
   std::optional<SendStream::CaptureMark> mark;
   double outputMs = 0;
   {
     std::lock_guard lock(m_mutex);
-    for (const auto &[id, incoming] : m_incoming) {
+    for (const auto &[streamId, incoming] : found->incoming) {
       if (incoming->kind == kind) {
         stream = incoming->stream;
         mark = incoming->mark;
@@ -534,7 +743,7 @@ std::optional<double> AudioPeer::latencyMs(StreamKind kind) const
   }
   // When the sample now leaving was captured, in our clock.
   const auto sinceMark = std::int32_t(stats.playoutTimestamp - mark->timestamp);
-  const double capturedUs = double(mark->captureUs - *offset) + sinceMark * 1e6 / kSampleRate;
+  const double capturedUs = double(mark->captureUs - offset) + sinceMark * 1e6 / kSampleRate;
   return (double(stats.playoutUs) - capturedUs) / 1000.0 + outputMs;
 }
 
@@ -554,24 +763,37 @@ void AudioPeer::receiveLoop()
     }
     std::lock_guard lock(m_mutex);
     ++m_counters.received;
-    const auto it = m_incoming.find(header->streamId);
-    if (it == m_incoming.end()) {
+    // Every computer numbers its streams the same way, so the stream id alone
+    // does not say whose packet this is; only that link's key opens it.
+    bool known = false;
+    bool stale = false;
+    bool opened = false;
+    for (const auto &[id, link] : m_links) {
+      const auto it = link->incoming.find(header->streamId);
+      if (it == link->incoming.end()) {
+        continue;
+      }
+      known = true;
+      auto &incoming = *it->second;
+      if (!incoming.replay.isFresh(header->sequence)) {
+        stale = true;
+        continue;
+      }
+      MediaHeader result;
+      const int length = incoming.opener->open(datagram, size, result, payload, sizeof(payload));
+      if (length < 0) {
+        continue;
+      }
+      incoming.replay.accept(result.sequence);
+      incoming.stream->push(result, payload, length, arrival);
+      opened = true;
+      break;
+    }
+    if (!known) {
       ++m_counters.unknownStream;
-      continue;
+    } else if (!opened) {
+      ++(stale ? m_counters.replayed : m_counters.forged);
     }
-    auto &incoming = *it->second;
-    if (!incoming.replay.isFresh(header->sequence)) {
-      ++m_counters.replayed;
-      continue;
-    }
-    MediaHeader opened;
-    const int length = incoming.opener->open(datagram, size, opened, payload, sizeof(payload));
-    if (length < 0) {
-      ++m_counters.forged;
-      continue;
-    }
-    incoming.replay.accept(opened.sequence);
-    incoming.stream->push(opened, payload, length, arrival);
   }
 }
 

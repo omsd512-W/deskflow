@@ -250,6 +250,7 @@ void MainWindow::connectSlots()
 
   connect(&m_coreProcess, &CoreProcess::error, this, &MainWindow::coreProcessError);
   connect(&m_coreProcess, &CoreProcess::logLine, this, &MainWindow::handleLogLine);
+  connect(&m_coreProcess, &CoreProcess::logLine, m_audioControl, &AudioControl::handleCoreLogLine);
   connect(
       &m_coreProcess, &CoreProcess::processStateChanged, this, &MainWindow::coreProcessStateChanged,
       Qt::QueuedConnection

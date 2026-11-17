@@ -349,6 +349,9 @@ QVariant Settings::defaultValue(const QString &key)
   if (key == Audio::OutputDevice || key == Audio::InputDevice)
     return QString();
 
+  if (key == Audio::MixMode)
+    return QStringLiteral("mix");
+
   if (key == Core::ProcessMode) {
 #ifdef Q_OS_WIN
     if (!Settings::isPortableMode())

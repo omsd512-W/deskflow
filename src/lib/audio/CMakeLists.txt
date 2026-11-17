@@ -42,6 +42,8 @@ add_library(audio STATIC
   AudioDevice.h
   AudioPeer.cpp
   AudioPeer.h
+  AudioSettingsSync.cpp
+  AudioSettingsSync.h
   AudioTypes.cpp
   AudioTypes.h
   ControlProtocol.cpp
@@ -50,6 +52,8 @@ add_library(audio STATIC
   MediaPacket.h
   OpusCodec.cpp
   OpusCodec.h
+  PlaybackMixer.cpp
+  PlaybackMixer.h
   ReceiveStream.cpp
   ReceiveStream.h
   SendStream.cpp

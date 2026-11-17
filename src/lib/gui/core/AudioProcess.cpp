@@ -60,17 +60,16 @@ bool AudioProcess::isAvailable()
   return QFile::exists(helperPath());
 }
 
-bool AudioProcess::anyFeatureEnabled()
+bool AudioProcess::isNeeded()
 {
-  using A = Settings::Audio;
   if (Settings::value(Settings::Core::CoreMode).toInt() == Settings::CoreMode::Client) {
 #if defined(Q_OS_MACOS)
-    return Settings::value(A::ForwardSystemAudio).toBool() || Settings::value(A::UseRemoteMicrophone).toBool();
+    return true;
 #else
     return false; // forwarding from this computer is only implemented on macOS
 #endif
   }
-  return Settings::value(A::AllowRemotePlayback).toBool() || Settings::value(A::AllowMicrophoneSharing).toBool();
+  return true;
 }
 
 void AudioProcess::setWanted(bool wanted)
@@ -119,7 +118,34 @@ void AudioProcess::start()
       QStringLiteral("--log-file"), logPath(), QStringLiteral("--parent-pid"),
       QString::number(QCoreApplication::applicationPid())
   };
+  connect(m_process, &QProcess::started, this, [this] {
+    if (!m_activeComputer.isEmpty()) {
+      sendCommand("ACTIVE", {{"name", m_activeComputer}});
+    }
+  });
   m_process->start(helperPath(), args);
+}
+
+void AudioProcess::setActiveComputer(const QString &name)
+{
+  if (name == m_activeComputer) {
+    return;
+  }
+  m_activeComputer = name;
+  sendCommand("ACTIVE", {{"name", name}});
+}
+
+void AudioProcess::setClientSetting(const QString &client, const QString &key, bool value)
+{
+  sendCommand("SET_CLIENT", {{"name", client}, {"key", key}, {"value", value}});
+}
+
+void AudioProcess::sendCommand(const char *command, const QJsonObject &argument)
+{
+  if (!m_process || m_process->state() != QProcess::Running) {
+    return;
+  }
+  m_process->write(QByteArray(command) + ' ' + QJsonDocument(argument).toJson(QJsonDocument::Compact) + '\n');
 }
 
 void AudioProcess::stop()
@@ -164,6 +190,12 @@ void AudioProcess::readOutput()
         setStatus(doc.object());
         // Healthy for a while: next crash restarts quickly again.
         m_restartDelayMs = 1000;
+      }
+    } else if (line.startsWith(QStringLiteral("SETTING "))) {
+      const auto setting = QJsonDocument::fromJson(line.mid(8).toUtf8()).object();
+      const auto key = setting.value(QStringLiteral("key")).toString();
+      if (key.startsWith(QStringLiteral("audio/"))) {
+        Q_EMIT settingRequested(key, setting.value(QStringLiteral("value")).toBool());
       }
     } else if (!line.isEmpty()) {
       // The helper prefixes its own time of day; the log view has its own.

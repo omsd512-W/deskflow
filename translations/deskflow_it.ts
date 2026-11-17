@@ -162,7 +162,16 @@ p, li { white-space: pre-wrap; }
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Play sound sent by clients</source>
+        <source>Clients&apos; sound</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mix them together</source>
+        <extracomment>Every client&apos;s sound plays at once</extracomment>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only the computer the cursor is on</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -170,11 +179,11 @@ p, li { white-space: pre-wrap; }
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Let clients use this computer&apos;s microphone</source>
+        <source>Record from</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Record from</source>
+        <source>Each client decides whether to send its sound and use this microphone; change a client&apos;s switches here in the Audio menu.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1515,15 +1524,65 @@ L&apos;abilitazione di questa impostazione disabiliterà l&apos;interfaccia graf
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Play sound sent by clients</source>
+        <source>Mix every client&apos;s sound</source>
+        <extracomment>Server: every client&apos;s sound plays at once</extracomment>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Share this computer&apos;s microphone with clients</source>
+        <source>Only play the computer the cursor is on</source>
+        <extracomment>Server: only the sound of the computer the cursor is on plays</extracomment>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Audio sharing is off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play its sound on this computer</source>
+        <extracomment>Server, a client&apos;s switch A: its sound plays here</extracomment>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep playing it there too</source>
+        <extracomment>Server, a client&apos;s switch B: the client keeps playing its own sound too</extracomment>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Let it use this computer&apos;s microphone</source>
+        <extracomment>Server, a client&apos;s switch C: this computer&apos;s microphone appears on the client</extracomment>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 (offline)</source>
+        <extracomment>A client in the server&apos;s Audio menu that is not connected now</extracomment>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Waiting for it to confirm the change</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Offline, takes effect when it next connects</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Offline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Playing here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sending sound, silent while the cursor is elsewhere</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>, using the microphone</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1559,11 +1618,11 @@ L&apos;abilitazione di questa impostazione disabiliterà l&apos;interfaccia graf
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>playing sound from %1</source>
+        <source>cannot play sound</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>cannot play sound</source>
+        <source>playing sound from %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

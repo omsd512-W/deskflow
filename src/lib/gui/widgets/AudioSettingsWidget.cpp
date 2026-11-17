@@ -64,16 +64,20 @@ AudioSettingsWidget::AudioSettingsWidget(QWidget *parent) : QWidget(parent)
 
   m_serverGroup = new QGroupBox(this);
   auto *serverLayout = new QFormLayout(m_serverGroup);
-  m_allowPlayback = new QCheckBox(m_serverGroup);
+  m_mixMode = new QComboBox(m_serverGroup);
+  m_mixMode->addItem(QString(), QStringLiteral("mix"));
+  m_mixMode->addItem(QString(), QStringLiteral("followCursor"));
+  m_mixModeLabel = new QLabel(m_serverGroup);
   m_output = new QComboBox(m_serverGroup);
   m_outputLabel = new QLabel(m_serverGroup);
-  m_allowMicrophone = new QCheckBox(m_serverGroup);
   m_input = new QComboBox(m_serverGroup);
   m_inputLabel = new QLabel(m_serverGroup);
-  serverLayout->addRow(m_allowPlayback);
+  m_serverNote = new QLabel(m_serverGroup);
+  m_serverNote->setWordWrap(true);
+  serverLayout->addRow(m_mixModeLabel, m_mixMode);
   serverLayout->addRow(m_outputLabel, m_output);
-  serverLayout->addRow(m_allowMicrophone);
   serverLayout->addRow(m_inputLabel, m_input);
+  serverLayout->addRow(m_serverNote);
   layout->addWidget(m_serverGroup);
 
   auto *portRow = new QFormLayout;
@@ -97,13 +101,13 @@ AudioSettingsWidget::AudioSettingsWidget(QWidget *parent) : QWidget(parent)
   retranslate();
   load();
 
-  for (auto *box : {m_forward, m_keepLocal, m_remoteMicrophone, m_allowPlayback, m_allowMicrophone}) {
+  for (auto *box : {m_forward, m_keepLocal, m_remoteMicrophone}) {
     connect(box, &QCheckBox::toggled, this, [this] {
       updateEnabled();
       Q_EMIT changed();
     });
   }
-  for (auto *combo : {m_output, m_input}) {
+  for (auto *combo : {m_mixMode, m_output, m_input}) {
     connect(combo, &QComboBox::currentIndexChanged, this, &AudioSettingsWidget::changed);
   }
   connect(m_port, &QSpinBox::valueChanged, this, &AudioSettingsWidget::changed);
@@ -123,10 +127,16 @@ void AudioSettingsWidget::retranslate()
   m_driverNote->setVisible(!micDriverInstalled());
 
   m_serverGroup->setTitle(tr("When this computer is the server"));
-  m_allowPlayback->setText(tr("Play sound sent by clients"));
+  m_mixModeLabel->setText(tr("Clients' sound"));
+  //: Every client's sound plays at once
+  m_mixMode->setItemText(0, tr("Mix them together"));
+  m_mixMode->setItemText(1, tr("Only the computer the cursor is on"));
   m_outputLabel->setText(tr("Play on"));
-  m_allowMicrophone->setText(tr("Let clients use this computer's microphone"));
   m_inputLabel->setText(tr("Record from"));
+  m_serverNote->setText(
+      tr("Each client decides whether to send its sound and use this microphone; change a "
+         "client's switches here in the Audio menu.")
+  );
   if (m_output->count() > 0) {
     m_output->setItemText(0, tr("System default"));
   }
@@ -154,15 +164,14 @@ void AudioSettingsWidget::fillDevices(QComboBox *combo, const QStringList &names
 void AudioSettingsWidget::load()
 {
   const QSignalBlocker blocks[] = {
-      QSignalBlocker(m_forward),       QSignalBlocker(m_keepLocal), QSignalBlocker(m_remoteMicrophone),
-      QSignalBlocker(m_allowPlayback), QSignalBlocker(m_allowMicrophone), QSignalBlocker(m_output),
-      QSignalBlocker(m_input),         QSignalBlocker(m_port),
+      QSignalBlocker(m_forward), QSignalBlocker(m_keepLocal), QSignalBlocker(m_remoteMicrophone),
+      QSignalBlocker(m_mixMode), QSignalBlocker(m_output),    QSignalBlocker(m_input),
+      QSignalBlocker(m_port),
   };
   m_forward->setChecked(Settings::value(A::ForwardSystemAudio).toBool());
   m_keepLocal->setChecked(Settings::value(A::KeepLocalPlayback).toBool());
   m_remoteMicrophone->setChecked(Settings::value(A::UseRemoteMicrophone).toBool());
-  m_allowPlayback->setChecked(Settings::value(A::AllowRemotePlayback).toBool());
-  m_allowMicrophone->setChecked(Settings::value(A::AllowMicrophoneSharing).toBool());
+  m_mixMode->setCurrentIndex(std::max(0, m_mixMode->findData(Settings::value(A::MixMode).toString())));
   m_output->setCurrentIndex(std::max(0, m_output->findData(Settings::value(A::OutputDevice).toString())));
   m_input->setCurrentIndex(std::max(0, m_input->findData(Settings::value(A::InputDevice).toString())));
   m_port->setValue(Settings::value(A::Port).toInt());
@@ -174,8 +183,7 @@ void AudioSettingsWidget::save() const
   Settings::setValue(A::ForwardSystemAudio, m_forward->isChecked());
   Settings::setValue(A::KeepLocalPlayback, m_keepLocal->isChecked());
   Settings::setValue(A::UseRemoteMicrophone, m_remoteMicrophone->isChecked());
-  Settings::setValue(A::AllowRemotePlayback, m_allowPlayback->isChecked());
-  Settings::setValue(A::AllowMicrophoneSharing, m_allowMicrophone->isChecked());
+  Settings::setValue(A::MixMode, comboValue(m_mixMode));
   Settings::setValue(A::OutputDevice, comboValue(m_output));
   Settings::setValue(A::InputDevice, comboValue(m_input));
   // Stored only when it differs from the default, which follows the Deskflow port.
@@ -189,8 +197,7 @@ bool AudioSettingsWidget::isModified() const
   return m_forward->isChecked() != Settings::value(A::ForwardSystemAudio).toBool() ||
          m_keepLocal->isChecked() != Settings::value(A::KeepLocalPlayback).toBool() ||
          m_remoteMicrophone->isChecked() != Settings::value(A::UseRemoteMicrophone).toBool() ||
-         m_allowPlayback->isChecked() != Settings::value(A::AllowRemotePlayback).toBool() ||
-         m_allowMicrophone->isChecked() != Settings::value(A::AllowMicrophoneSharing).toBool() ||
+         comboValue(m_mixMode) != Settings::value(A::MixMode).toString() ||
          comboValue(m_output) != Settings::value(A::OutputDevice).toString() ||
          comboValue(m_input) != Settings::value(A::InputDevice).toString() ||
          m_port->value() != Settings::value(A::Port).toInt();
@@ -201,10 +208,8 @@ bool AudioSettingsWidget::isDefault() const
   return m_forward->isChecked() == Settings::defaultValue(A::ForwardSystemAudio).toBool() &&
          m_keepLocal->isChecked() == Settings::defaultValue(A::KeepLocalPlayback).toBool() &&
          m_remoteMicrophone->isChecked() == Settings::defaultValue(A::UseRemoteMicrophone).toBool() &&
-         m_allowPlayback->isChecked() == Settings::defaultValue(A::AllowRemotePlayback).toBool() &&
-         m_allowMicrophone->isChecked() == Settings::defaultValue(A::AllowMicrophoneSharing).toBool() &&
-         comboValue(m_output).isEmpty() && comboValue(m_input).isEmpty() &&
-         m_port->value() == Settings::defaultValue(A::Port).toInt();
+         comboValue(m_mixMode) == Settings::defaultValue(A::MixMode).toString() && comboValue(m_output).isEmpty() &&
+         comboValue(m_input).isEmpty() && m_port->value() == Settings::defaultValue(A::Port).toInt();
 }
 
 void AudioSettingsWidget::resetToDefault()
@@ -212,8 +217,7 @@ void AudioSettingsWidget::resetToDefault()
   m_forward->setChecked(Settings::defaultValue(A::ForwardSystemAudio).toBool());
   m_keepLocal->setChecked(Settings::defaultValue(A::KeepLocalPlayback).toBool());
   m_remoteMicrophone->setChecked(Settings::defaultValue(A::UseRemoteMicrophone).toBool());
-  m_allowPlayback->setChecked(Settings::defaultValue(A::AllowRemotePlayback).toBool());
-  m_allowMicrophone->setChecked(Settings::defaultValue(A::AllowMicrophoneSharing).toBool());
+  m_mixMode->setCurrentIndex(0);
   m_output->setCurrentIndex(0);
   m_input->setCurrentIndex(0);
   m_port->setValue(Settings::defaultValue(A::Port).toInt());
@@ -225,6 +229,4 @@ void AudioSettingsWidget::updateEnabled()
   const bool writable = Settings::isWritable();
   setEnabled(writable);
   m_keepLocal->setEnabled(m_forward->isChecked());
-  m_output->setEnabled(m_allowPlayback->isChecked());
-  m_input->setEnabled(m_allowMicrophone->isChecked());
 }

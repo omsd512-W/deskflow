@@ -41,8 +41,8 @@ public:
     inline static const auto KeepLocalPlayback = QStringLiteral("audio/keepLocalPlayback");
     inline static const auto UseRemoteMicrophone = QStringLiteral("audio/useRemoteMicrophone");
     // On the computer with the headset (the server).
-    inline static const auto AllowRemotePlayback = QStringLiteral("audio/allowRemotePlayback");
-    inline static const auto AllowMicrophoneSharing = QStringLiteral("audio/allowMicrophoneSharing");
+    //! How the sound of several clients is played: "mix" or "followCursor".
+    inline static const auto MixMode = QStringLiteral("audio/mixMode");
     inline static const auto OutputDevice = QStringLiteral("audio/outputDevice");
     inline static const auto InputDevice = QStringLiteral("audio/inputDevice");
     inline static const auto Port = QStringLiteral("audio/port");
@@ -293,8 +293,7 @@ private:
       Audio::ForwardSystemAudio
     , Audio::KeepLocalPlayback
     , Audio::UseRemoteMicrophone
-    , Audio::AllowRemotePlayback
-    , Audio::AllowMicrophoneSharing
+    , Audio::MixMode
     , Audio::OutputDevice
     , Audio::InputDevice
     , Audio::Port
@@ -395,9 +394,7 @@ private:
 
   // When checking the default values this list contains the ones that default to true.
   inline static const QStringList m_defaultTrueValues = {
-      Audio::AllowRemotePlayback
-    , Audio::AllowMicrophoneSharing
-    , Core::UseHooks
+      Core::UseHooks
     , Gui::CloseToTray
     , Gui::CloseReminder
     , Gui::LogExpanded

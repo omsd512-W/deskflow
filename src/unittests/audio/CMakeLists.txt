@@ -5,7 +5,16 @@ if(WIN32)
   set(extra_libs version)
 endif()
 
-foreach(name MediaPacketTests OpusCodecTests ReceiveStreamTests TlsChannelTests AudioPeerTests)
+foreach(
+  name
+  MediaPacketTests
+  OpusCodecTests
+  ReceiveStreamTests
+  TlsChannelTests
+  AudioPeerTests
+  AudioSettingsSyncTests
+  PlaybackMixerTests
+)
   create_test(
     NAME ${name}
     DEPENDS audio

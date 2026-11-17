@@ -9,6 +9,7 @@
 #include "audio/AudioPeer.h"
 #include "audio/UdpSocket.h"
 
+#include <QJsonObject>
 #include <QRandomGenerator>
 #include <QSignalSpy>
 #include <QTcpServer>
@@ -222,6 +223,93 @@ void AudioPeerTests::test_clientReconnects()
   QVERIFY(client.receiveStream(StreamKind::System) != first);
   exchange(*server, client, 30);
   QVERIFY(client.receiveStream(StreamKind::System)->stats().packets > 15);
+}
+
+void AudioPeerTests::test_serverTakesSeveralClients()
+{
+  const auto port = freePort();
+  QVERIFY(port != 0);
+  const auto serverTrusts = TestCertificates::sha256(m_certificates.second);
+  const auto clientsTrust = TestCertificates::sha256(m_certificates.first);
+  AudioPeer server(serverConfig(port, m_certificates.first, serverTrusts));
+  auto miniConfig = clientConfig(port, m_certificates.second, clientsTrust);
+  miniConfig.name = QStringLiteral("mini");
+  auto studioConfig = clientConfig(port, m_certificates.second, clientsTrust);
+  studioConfig.name = QStringLiteral("studio");
+  AudioPeer mini(miniConfig);
+  AudioPeer studio(studioConfig);
+  QSignalSpy messages(&studio, &AudioPeer::messageReceived);
+  mini.setSending(StreamKind::System, true);
+  studio.setSending(StreamKind::System, true);
+  QVERIFY(server.start());
+  QVERIFY(mini.start());
+  QVERIFY(studio.start());
+  QTRY_VERIFY_WITH_TIMEOUT(server.links().size() == 2 && mini.isConnected() && studio.isConnected(), 5000);
+  const int miniLink = server.linkNamed(QStringLiteral("mini"));
+  const int studioLink = server.linkNamed(QStringLiteral("studio"));
+  QVERIFY(miniLink >= 0 && studioLink >= 0 && miniLink != studioLink);
+  QCOMPARE(server.peerName(studioLink), QStringLiteral("studio"));
+
+  // Only the studio gets the microphone.
+  server.setSending(studioLink, StreamKind::Microphone, true);
+  QTRY_VERIFY(studio.receiveStream(StreamKind::Microphone));
+  QVERIFY(!mini.receiveStream(StreamKind::Microphone));
+  QVERIFY(!server.sendStream(miniLink, StreamKind::Microphone));
+
+  // Both send sound with the same stream id; each arrives on its own link.
+  QTRY_VERIFY(
+      server.receiveStream(miniLink, StreamKind::System) && server.receiveStream(studioLink, StreamKind::System)
+  );
+  std::vector<float> loud(480 * 2, 0.5f);
+  std::vector<float> quiet(480 * 2, 0.05f);
+  std::vector<float> out(480 * 2);
+  for (int i = 0; i < 40; ++i) {
+    mini.sendStream(StreamKind::System)->push(loud.data(), 480);
+    studio.sendStream(StreamKind::System)->push(quiet.data(), 480);
+    QTest::qWait(10);
+    server.receiveStream(miniLink, StreamKind::System)->pull(out.data(), 480);
+    server.receiveStream(studioLink, StreamKind::System)->pull(out.data(), 480);
+  }
+  QVERIFY(server.receiveStream(miniLink, StreamKind::System)->stats().packets > 20);
+  QVERIFY(server.receiveStream(studioLink, StreamKind::System)->stats().packets > 20);
+  QCOMPARE(server.datagramCounters().forged, 0u);
+
+  // A message for one client reaches only that client.
+  server.sendMessage(studioLink, {{"type", "settings"}, {"values", QJsonObject{}}});
+  QTRY_COMPARE(messages.count(), 1);
+  QCOMPARE(messages.first().at(1).toJsonObject().value("type").toString(), QStringLiteral("settings"));
+
+  // One leaving does not disturb the other.
+  QSignalSpy left(&server, &AudioPeer::linkDisconnected);
+  mini.stop();
+  QTRY_COMPARE(left.count(), 1);
+  QCOMPARE(left.first().at(0).toInt(), miniLink);
+  QCOMPARE(server.links(), std::vector<int>{studioLink});
+  QVERIFY(studio.isConnected());
+  QVERIFY(server.receiveStream(studioLink, StreamKind::System));
+}
+
+void AudioPeerTests::test_sameNameReplacesOldConnection()
+{
+  const auto port = freePort();
+  QVERIFY(port != 0);
+  AudioPeer server(serverConfig(port, m_certificates.first, TestCertificates::sha256(m_certificates.second)));
+  auto first = std::make_unique<AudioPeer>(
+      clientConfig(port, m_certificates.second, TestCertificates::sha256(m_certificates.first))
+  );
+  QVERIFY(server.start());
+  QVERIFY(first->start());
+  QTRY_VERIFY_WITH_TIMEOUT(server.links().size() == 1, 5000);
+  const int oldLink = server.links().front();
+
+  // The same computer again (its helper restarted before the old connection timed out).
+  AudioPeer second(clientConfig(port, m_certificates.second, TestCertificates::sha256(m_certificates.first)));
+  QVERIFY(second.start());
+  QTRY_VERIFY_WITH_TIMEOUT(second.isConnected(), 5000);
+  QTRY_COMPARE(server.links().size(), std::size_t(1));
+  QVERIFY(server.links().front() != oldLink);
+  QCOMPARE(server.linkNamed(QStringLiteral("client")), server.links().front());
+  first.reset();
 }
 
 QTEST_MAIN(AudioPeerTests)

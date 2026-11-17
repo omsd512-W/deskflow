@@ -19,13 +19,14 @@
 
 #include <atomic>
 #include <deque>
-#include <optional>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <thread>
+#include <vector>
 
 class QTcpServer;
 class QTcpSocket;
@@ -55,9 +56,13 @@ struct PeerConfig
 };
 
 /**
- * One end of an audio link between two Deskflow computers: a TLS control
- * connection (server listens, client connects and reconnects) plus one UDP
- * socket carrying every stream in both directions.
+ * One end of the audio links between Deskflow computers: TLS control
+ * connections (the server listens and takes several clients, a client
+ * connects to one server and reconnects) plus one UDP socket carrying every
+ * stream in both directions.
+ *
+ * Each connected computer is a link with its own id. The methods without a
+ * link id act on the first connected link, which is all a client has.
  *
  * Lives on the thread that runs its event loop. sendStream() and
  * receiveStream() hand out shared pointers that capture and playback threads
@@ -67,43 +72,57 @@ class AudioPeer : public QObject
 {
   Q_OBJECT
 public:
+  //! How many computers a server takes at once.
+  static constexpr int kMaxLinks = 8;
+
   explicit AudioPeer(PeerConfig config, QObject *parent = nullptr);
   ~AudioPeer() override;
 
   bool start(QString *error = nullptr);
   void stop();
 
+  //! Connected links, oldest first.
+  std::vector<int> links() const;
   bool isConnected() const
   {
-    return m_connected;
+    return !links().empty();
   }
-  QString peerName() const
-  {
-    return m_peerName;
-  }
-  double roundTripMs() const
-  {
-    return m_roundTripMs.load(std::memory_order_relaxed);
-  }
+  QString peerName() const;
+  QString peerName(int link) const;
+  //! The connected link to this computer, or -1.
+  int linkNamed(const QString &name) const;
+
+  double roundTripMs() const;
+  double roundTripMs(int link) const;
   //! Peer clock minus ours (µs), from the quickest recent ping; nullopt until measured.
   std::optional<std::int64_t> clockOffsetUs() const;
+  std::optional<std::int64_t> clockOffsetUs(int link) const;
 
   //! How long after capture on the peer the stream of this kind is heard
   //! here, given how long the local output device takes to play what it is
   //! handed. nullopt until the clocks are synchronised and audio is playing.
   std::optional<double> latencyMs(StreamKind kind) const;
+  std::optional<double> latencyMs(int link, StreamKind kind) const;
   //! Set by whoever plays the stream of this kind (any thread).
   void setOutputLatency(StreamKind kind, double ms);
 
-  //! Offer a stream of this kind whenever connected.
+  //! Offer a stream of this kind to every link, now and whenever one connects.
   void setSending(StreamKind kind, bool enabled);
+  //! Offer a stream of this kind to one link only.
+  void setSending(int link, StreamKind kind, bool enabled);
   std::shared_ptr<SendStream> sendStream(StreamKind kind) const;
+  std::shared_ptr<SendStream> sendStream(int link, StreamKind kind) const;
   std::shared_ptr<ReceiveStream> receiveStream(StreamKind kind) const;
+  std::shared_ptr<ReceiveStream> receiveStream(int link, StreamKind kind) const;
   //! The peer's latest report about the stream of this kind that we send.
   QJsonObject remoteStats(StreamKind kind) const;
+  QJsonObject remoteStats(int link, StreamKind kind) const;
 
-  //! Tell the peer whether we currently need its stream of this kind.
+  //! Tell every link whether we currently need its stream of this kind.
   void sendDemand(StreamKind kind, bool active);
+  void sendDemand(int link, StreamKind kind, bool active);
+  //! Send a control message of a type this class does not handle itself.
+  void sendMessage(int link, const QJsonObject &message);
 
   struct DatagramCounters
   {
@@ -115,10 +134,15 @@ public:
   DatagramCounters datagramCounters() const;
 
 Q_SIGNALS:
+  //! A link finished its handshake (connected) or went away (disconnected).
   void connected();
   void disconnected(const QString &reason);
-  void receiveStreamChanged(deskflow::audio::StreamKind kind);
-  void demandChanged(deskflow::audio::StreamKind kind, bool active);
+  void linkConnected(int link);
+  void linkDisconnected(int link, const QString &reason);
+  void receiveStreamChanged(int link, deskflow::audio::StreamKind kind);
+  void demandChanged(int link, deskflow::audio::StreamKind kind, bool active);
+  //! A control message of a type this class does not handle itself.
+  void messageReceived(int link, const QJsonObject &message);
   void logMessage(const QString &line);
 
 private:
@@ -132,54 +156,67 @@ private:
     std::optional<SendStream::CaptureMark> mark; //!< guarded by m_mutex
   };
 
+  struct ClockSample
+  {
+    std::int64_t roundTripUs;
+    std::int64_t offsetUs;
+  };
+
+  //! One connection. Fields marked main are only touched on the main thread.
+  struct Link
+  {
+    int id = 0;
+    TlsChannel *channel = nullptr;             // main
+    bool connected = false;                    // main
+    QString name;                              // main
+    QHostAddress address;                      // main
+    quint16 udpPort = 0;                       // main
+    QElapsedTimer lastHeard;                   // main
+    double roundTripMs = 0;                    // main
+    std::deque<ClockSample> clockSamples;      // main
+    std::optional<std::int64_t> clockOffsetUs; // main
+    std::set<StreamKind> sending;              // main
+    // Guarded by AudioPeer::m_mutex.
+    std::map<StreamKind, std::shared_ptr<SendStream>> send;
+    std::map<std::uint8_t, std::shared_ptr<Incoming>> incoming;
+    std::map<StreamKind, QJsonObject> remoteStats;
+  };
+
+  std::shared_ptr<Link> link(int id) const;
+  std::shared_ptr<Link> firstLink() const;
   void connectToServer();
   void scheduleReconnect();
   void attachChannel(QTcpSocket *socket, bool server);
-  void onChannelReady();
-  void onMessage(const QJsonObject &message);
-  void onChannelClosed(const QString &reason);
+  void onChannelReady(int id);
+  void onHello(Link &link, const QJsonObject &message);
+  void onMessage(int id, const QJsonObject &message);
+  void onChannelClosed(int id, const QString &reason);
   bool isTrusted(const QByteArray &sha256) const;
-  void openSendStream(StreamKind kind);
-  void closeSendStream(StreamKind kind);
+  void openSendStream(Link &link, StreamKind kind);
+  void closeSendStream(Link &link, StreamKind kind);
   void sendStats();
   void sendPing();
-  void onPong(const QJsonObject &message);
+  void sendPing(Link &link);
+  void onPong(Link &link, const QJsonObject &message);
   void receiveLoop();
   void log(const QString &line);
 
   PeerConfig m_config;
   QTcpServer *m_server = nullptr;
   QTcpSocket *m_connecting = nullptr;
-  TlsChannel *m_channel = nullptr;
   QTimer m_reconnectTimer;
   QTimer m_pingTimer;
   QTimer m_statsTimer;
   int m_reconnectDelayMs = 1000;
-
-  bool m_connected = false;
-  QString m_peerName;
-  QHostAddress m_remoteAddress;
-  quint16 m_remoteUdpPort = 0;
-  QElapsedTimer m_lastHeard; //!< since the last control message from the peer
-  std::atomic<double> m_roundTripMs{0};
-  struct ClockSample
-  {
-    std::int64_t roundTripUs;
-    std::int64_t offsetUs;
-  };
-  std::deque<ClockSample> m_clockSamples; // main thread
-  std::atomic<std::int64_t> m_clockOffsetUs{0};
-  std::atomic<bool> m_haveClockOffset{false};
+  int m_nextLinkId = 1;
 
   std::shared_ptr<UdpSocket> m_udp;
   std::thread m_receiver;
   std::atomic<bool> m_running{false};
 
-  std::set<StreamKind> m_sending;
-  mutable std::mutex m_mutex; // guards the four members below
-  std::map<StreamKind, std::shared_ptr<SendStream>> m_send;
-  std::map<std::uint8_t, std::shared_ptr<Incoming>> m_incoming;
-  std::map<StreamKind, QJsonObject> m_remoteStats;
+  std::set<StreamKind> m_sending;               //!< offered to every link
+  mutable std::mutex m_mutex;                   // guards the links' streams and the members below
+  std::map<int, std::shared_ptr<Link>> m_links; // added and removed on the main thread
   std::map<StreamKind, double> m_outputLatencyMs;
   DatagramCounters m_counters;
 };

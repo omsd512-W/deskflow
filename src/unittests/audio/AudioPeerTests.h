@@ -17,6 +17,8 @@ private Q_SLOTS:
   void test_untrustedPeerIsRejected();
   void test_stopSendingClosesStream();
   void test_clientReconnects();
+  void test_serverTakesSeveralClients();
+  void test_sameNameReplacesOldConnection();
 
 private:
   TestCertificates m_certificates;

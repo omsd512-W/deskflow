@@ -162,8 +162,21 @@ p, li { white-space: pre-wrap; }
         <translation>本机作为服务端时</translation>
     </message>
     <message>
+        <source>Clients&apos; sound</source>
+        <translation>客户端的声音</translation>
+    </message>
+    <message>
+        <source>Mix them together</source>
+        <extracomment>Every client&apos;s sound plays at once</extracomment>
+        <translation>混在一起播放</translation>
+    </message>
+    <message>
+        <source>Only the computer the cursor is on</source>
+        <translation>只放光标所在的电脑</translation>
+    </message>
+    <message>
         <source>Play sound sent by clients</source>
-        <translation>播放客户端送来的声音</translation>
+        <translation type="vanished">播放客户端送来的声音</translation>
     </message>
     <message>
         <source>Play on</source>
@@ -171,11 +184,15 @@ p, li { white-space: pre-wrap; }
     </message>
     <message>
         <source>Let clients use this computer&apos;s microphone</source>
-        <translation>允许客户端使用本机的麦克风</translation>
+        <translation type="vanished">允许客户端使用本机的麦克风</translation>
     </message>
     <message>
         <source>Record from</source>
         <translation>录音设备</translation>
+    </message>
+    <message>
+        <source>Each client decides whether to send its sound and use this microphone; change a client&apos;s switches here in the Audio menu.</source>
+        <translation>每台客户端自己决定是否送来声音、是否使用本机麦克风；也可以在本机的「音频」菜单里直接改各台客户端的开关。</translation>
     </message>
     <message>
         <source>System default</source>
@@ -1495,6 +1512,74 @@ Enabling this setting will disable the server config GUI.</source>
     </message>
 </context>
 <context>
+    <name>deskflow::gui</name>
+    <message>
+        <source>Audio sharing is off</source>
+        <translation type="obsolete">音频共享已关闭</translation>
+    </message>
+    <message>
+        <source>Audio: starting</source>
+        <translation type="obsolete">音频：正在启动</translation>
+    </message>
+    <message>
+        <source>waiting for the server</source>
+        <translation type="obsolete">等待服务端</translation>
+    </message>
+    <message>
+        <source>sound on %1</source>
+        <translation type="obsolete">声音在 %1 播放</translation>
+    </message>
+    <message>
+        <source>%1 is not playing sound</source>
+        <translation type="obsolete">%1 没有播放声音</translation>
+    </message>
+    <message>
+        <source>sound not reaching %1, playing here</source>
+        <translation type="obsolete">声音没到 %1，改在本机播放</translation>
+    </message>
+    <message>
+        <source>cannot record this computer&apos;s sound</source>
+        <translation type="obsolete">无法录制本机声音</translation>
+    </message>
+    <message>
+        <source>microphone of %1</source>
+        <translation type="obsolete">%1 的麦克风</translation>
+    </message>
+    <message>
+        <source>microphone driver not installed</source>
+        <translation type="obsolete">麦克风驱动未安装</translation>
+    </message>
+    <message>
+        <source>cannot play sound</source>
+        <translation type="obsolete">无法播放声音</translation>
+    </message>
+    <message>
+        <source>playing sound from %1</source>
+        <translation type="obsolete">正在播放 %1 的声音</translation>
+    </message>
+    <message>
+        <source>connected to %1</source>
+        <translation type="obsolete">已连接 %1</translation>
+    </message>
+    <message>
+        <source>waiting for a client</source>
+        <translation type="obsolete">等待客户端</translation>
+    </message>
+    <message>
+        <source>microphone shared</source>
+        <translation type="obsolete">麦克风已共享</translation>
+    </message>
+    <message>
+        <source>cannot record the microphone</source>
+        <translation type="obsolete">无法录制麦克风</translation>
+    </message>
+    <message>
+        <source>Audio: %1</source>
+        <extracomment>Status bar text, followed by a list such as &quot;sound on Windows-PC (35 ms)&quot;</extracomment>
+        <translation type="obsolete">音频：%1</translation>
+    </message>
+</context>
+<context>
     <name>deskflow::gui::AudioControl</name>
     <message>
         <source>&amp;Audio</source>
@@ -1516,16 +1601,74 @@ Enabling this setting will disable the server config GUI.</source>
         <translation>使用服务端的麦克风</translation>
     </message>
     <message>
+        <source>Mix every client&apos;s sound</source>
+        <extracomment>Server: every client&apos;s sound plays at once</extracomment>
+        <translation>混合播放所有客户端的声音</translation>
+    </message>
+    <message>
+        <source>Only play the computer the cursor is on</source>
+        <extracomment>Server: only the sound of the computer the cursor is on plays</extracomment>
+        <translation>只放光标所在的电脑</translation>
+    </message>
+    <message>
         <source>Play sound sent by clients</source>
-        <translation>播放客户端送来的声音</translation>
+        <translation type="vanished">播放客户端送来的声音</translation>
     </message>
     <message>
         <source>Share this computer&apos;s microphone with clients</source>
-        <translation>把本机麦克风共享给客户端</translation>
+        <translation type="vanished">把本机麦克风共享给客户端</translation>
     </message>
     <message>
         <source>Audio sharing is off</source>
         <translation>音频共享已关闭</translation>
+    </message>
+    <message>
+        <source>Play its sound on this computer</source>
+        <extracomment>Server, a client&apos;s switch A: its sound plays here</extracomment>
+        <translation>在本机播放它的声音</translation>
+    </message>
+    <message>
+        <source>Keep playing it there too</source>
+        <extracomment>Server, a client&apos;s switch B: the client keeps playing its own sound too</extracomment>
+        <translation>它那边也继续播放</translation>
+    </message>
+    <message>
+        <source>Let it use this computer&apos;s microphone</source>
+        <extracomment>Server, a client&apos;s switch C: this computer&apos;s microphone appears on the client</extracomment>
+        <translation>让它使用本机的麦克风</translation>
+    </message>
+    <message>
+        <source>%1 (offline)</source>
+        <extracomment>A client in the server&apos;s Audio menu that is not connected now</extracomment>
+        <translation>%1（离线）</translation>
+    </message>
+    <message>
+        <source>Waiting for it to confirm the change</source>
+        <translation>等待它确认修改</translation>
+    </message>
+    <message>
+        <source>Offline, takes effect when it next connects</source>
+        <translation>离线，下次连接时生效</translation>
+    </message>
+    <message>
+        <source>Offline</source>
+        <translation>离线</translation>
+    </message>
+    <message>
+        <source>Playing here</source>
+        <translation>正在本机播放</translation>
+    </message>
+    <message>
+        <source>Sending sound, silent while the cursor is elsewhere</source>
+        <translation>正在送来声音，光标不在它那里时静音</translation>
+    </message>
+    <message>
+        <source>Connected</source>
+        <translation>已连接</translation>
+    </message>
+    <message>
+        <source>, using the microphone</source>
+        <translation>，正在使用麦克风</translation>
     </message>
     <message>
         <source>Audio: starting</source>

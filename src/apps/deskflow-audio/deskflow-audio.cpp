@@ -38,9 +38,12 @@
 #include <openssl/x509.h>
 
 #include <csignal>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
+#include <thread>
 
 #if defined(Q_OS_WIN)
 #include <windows.h>
@@ -198,6 +201,41 @@ private:
 #endif
 };
 
+//! A line for the GUI that started us (see AudioProcess).
+void tellGui(const char *kind, const QJsonObject &object)
+{
+  static QTextStream out(stdout);
+  out << kind << ' ' << QJsonDocument(object).toJson(QJsonDocument::Compact) << Qt::endl;
+}
+
+//! The running service, for commands from the GUI. Main thread only.
+AudioService *g_service = nullptr;
+
+//! Hands the GUI's commands (one per line on stdin) to the service.
+void readCommands()
+{
+  // Never deleted: the reading thread may outlive the service, blocked on
+  // stdin, and the calls it queues run on the main thread.
+  auto *relay = new QObject;
+  std::thread([relay] {
+    std::string line;
+    while (std::getline(std::cin, line)) {
+      const auto text = QString::fromUtf8(line).trimmed();
+      if (!text.isEmpty()) {
+        QMetaObject::invokeMethod(
+            relay,
+            [text] {
+              if (g_service) {
+                g_service->handleCommand(text);
+              }
+            },
+            Qt::QueuedConnection
+        );
+      }
+    }
+  }).detach();
+}
+
 int runService(const QString &logPath, qint64 parentPid, const QString &trustedDb, double statusLogSeconds)
 {
   std::unique_ptr<QFile> logFile;
@@ -224,19 +262,27 @@ int runService(const QString &logPath, qint64 parentPid, const QString &trustedD
 
   AudioService service;
   service.setTrustedDbOverride(trustedDb);
+  if (!logPath.isEmpty()) {
+    service.setStateDirectory(QFileInfo(logPath).absolutePath());
+  }
   QObject::connect(&service, &AudioService::logMessage, &service, write);
+  QObject::connect(&service, &AudioService::settingRequested, &service, [](const QString &key, bool value) {
+    tellGui("SETTING", {{"key", key}, {"value", value}});
+  });
   // One line per change, for the GUI that started us to read.
   QByteArray lastStatus;
   QObject::connect(&service, &AudioService::statusChanged, &service, [&service, &lastStatus] {
-    const auto status = QJsonDocument(service.status()).toJson(QJsonDocument::Compact);
-    if (status != lastStatus) {
-      lastStatus = status;
-      static QTextStream out(stdout);
-      out << "STATUS " << status << Qt::endl;
+    const auto status = service.status();
+    const auto compact = QJsonDocument(status).toJson(QJsonDocument::Compact);
+    if (compact != lastStatus) {
+      lastStatus = compact;
+      tellGui("STATUS", status);
     }
   });
   write(QStringLiteral("%1 audio helper starting (pid %2)").arg(kAppName).arg(QCoreApplication::applicationPid()));
   service.start();
+  g_service = &service;
+  readCommands();
 
   // A periodic snapshot in the log file, for diagnosing problems afterwards.
   QTimer statusLog;
@@ -268,6 +314,7 @@ int runService(const QString &logPath, qint64 parentPid, const QString &trustedD
   });
   watchdog.start(200);
   const int result = QCoreApplication::exec();
+  g_service = nullptr;
   return result;
 }
 

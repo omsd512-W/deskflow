@@ -44,12 +44,13 @@ private:
   QLabel *m_driverNote = nullptr;
 
   QGroupBox *m_serverGroup = nullptr;
-  QCheckBox *m_allowPlayback = nullptr;
+  QLabel *m_mixModeLabel = nullptr;
+  QComboBox *m_mixMode = nullptr;
   QLabel *m_outputLabel = nullptr;
   QComboBox *m_output = nullptr;
-  QCheckBox *m_allowMicrophone = nullptr;
   QLabel *m_inputLabel = nullptr;
   QComboBox *m_input = nullptr;
+  QLabel *m_serverNote = nullptr;
 
   QLabel *m_portLabel = nullptr;
   QSpinBox *m_port = nullptr;

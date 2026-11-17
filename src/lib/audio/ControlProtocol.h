@@ -18,7 +18,8 @@
 namespace deskflow::audio::protocol {
 
 //! Bumped on incompatible changes; peers with a different version disconnect.
-inline constexpr int kVersion = 1;
+//! 2: a server takes several clients, and they share their audio settings.
+inline constexpr int kVersion = 2;
 
 inline const QString kType = QStringLiteral("type");
 
@@ -32,6 +33,8 @@ inline const QString kPong = QStringLiteral("pong");               // t: echoed,
 inline const QString kStats = QStringLiteral("stats");             // id + ReceiveStats fields, latencyMs
 //! Sample `ts` of stream `id` was captured at sender clock `us`.
 inline const QString kTiming = QStringLiteral("timing");           // id, ts, us
+//! A client's shared audio settings, see AudioSettingsSync.h.
+inline const QString kSettings = QStringLiteral("settings"); // values, modified
 
 struct Hello
 {

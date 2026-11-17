@@ -14,8 +14,11 @@
 #include "audio/macos/VirtualMicrophone.h"
 #endif
 
+#include <QDateTime>
+#include <QDir>
 #include <QFileInfo>
 #include <QHostInfo>
+#include <QJsonDocument>
 
 namespace deskflow::audio {
 
@@ -38,6 +41,8 @@ constexpr qint64 kIdlePlaybackMs = 10000;
 constexpr qint64 kDeliveryGraceMs = 3000;
 //! Retry interval for a device that would not open.
 constexpr qint64 kRetryMs = 3000;
+//! How long a setting from the server may take to show up in the settings file.
+constexpr qint64 kUnsavedMs = 3000;
 
 QString stripPort(QString host)
 {
@@ -54,7 +59,7 @@ QString stripPort(QString host)
 
 } // namespace
 
-AudioService::AudioService(QObject *parent) : QObject(parent)
+AudioService::AudioService(QObject *parent) : QObject(parent), m_mixer(2, kSampleRate)
 {
   m_clock.start();
   m_reloadTimer.setSingleShot(true);
@@ -83,6 +88,12 @@ void AudioService::start()
   m_settingsPath = Settings::settingsFile();
   m_settings = std::make_unique<QSettings>(m_settingsPath, QSettings::IniFormat);
   log(QStringLiteral("following settings in %1").arg(m_settingsPath));
+  // Not next to the settings, whose directory is watched for changes.
+  const auto stateDirectory = m_stateDirectory.isEmpty() ? QFileInfo(m_settingsPath).absolutePath() : m_stateDirectory;
+  QDir().mkpath(stateDirectory);
+  m_state = std::make_unique<QSettings>(
+      QDir(stateDirectory).filePath(QStringLiteral("audio-sharing.ini")), QSettings::IniFormat
+  );
 
 #if defined(Q_OS_MACOS)
   macos::SystemAudioCapture::removeStaleTaps([this](const QString &line) { log(line); });
@@ -131,23 +142,22 @@ void AudioService::start()
   m_playback = std::make_unique<AudioDevice>(AudioDevice::Direction::Playback, 2, [this](const QString &line) {
     QMetaObject::invokeMethod(this, [this, line] { log(line); }, Qt::QueuedConnection);
   });
-  m_playback->setSource([this](float *out, int frames) {
-    if (auto stream = m_systemReceive.get()) {
-      stream->pull(out, frames);
-    } else {
-      std::fill(out, out + std::size_t(frames) * 2, 0.0f);
-    }
-  });
+  m_playback->setSource([this](float *out, int frames) { m_mixer.pull(out, frames); });
   m_recorder = std::make_unique<AudioDevice>(AudioDevice::Direction::Capture, 1, [this](const QString &line) {
     QMetaObject::invokeMethod(this, [this, line] { log(line); }, Qt::QueuedConnection);
   });
   m_recorder->setSink([this](const float *pcm, int frames, Clock::time_point captured) {
-    if (auto stream = m_microphoneSend.get()) {
-      stream->push(pcm, frames, captured);
+    if (const auto streams = m_microphoneSends.get()) {
+      for (const auto &stream : *streams) {
+        stream->push(pcm, frames, captured);
+      }
     }
   });
 
   m_config = readConfig();
+  m_mixer.setMode(m_config.mixMode);
+  trackLocalSettings(true);
+  loadClients();
   watchSettings();
   createPeer();
   m_tickTimer.start();
@@ -180,8 +190,9 @@ AudioService::Config AudioService::readConfig()
   config.forwardSystemAudio = value(Settings::Audio::ForwardSystemAudio).toBool();
   config.keepLocalPlayback = value(Settings::Audio::KeepLocalPlayback).toBool();
   config.useRemoteMicrophone = value(Settings::Audio::UseRemoteMicrophone).toBool();
-  config.allowRemotePlayback = value(Settings::Audio::AllowRemotePlayback).toBool();
-  config.allowMicrophoneSharing = value(Settings::Audio::AllowMicrophoneSharing).toBool();
+  config.mixMode = value(Settings::Audio::MixMode).toString() == QStringLiteral("followCursor")
+                       ? PlaybackMixer::Mode::FollowCursor
+                       : PlaybackMixer::Mode::Mix;
   config.outputDevice = value(Settings::Audio::OutputDevice).toString();
   config.inputDevice = value(Settings::Audio::InputDevice).toString();
   return config;
@@ -207,16 +218,29 @@ void AudioService::reload()
   const bool reconnect = !config.sameConnection(m_config);
   const auto old = m_config;
   m_config = config;
+  if (old.role != config.role) {
+    m_local.clear();
+    trackLocalSettings(true);
+    loadClients();
+  } else {
+    trackLocalSettings(false);
+  }
+  if (old.mixMode != config.mixMode) {
+    m_mixer.setMode(config.mixMode);
+    log(config.mixMode == PlaybackMixer::Mode::Mix
+            ? QStringLiteral("playing every client's sound")
+            : QStringLiteral("playing only the sound of the computer the cursor is on"));
+    Q_EMIT statusChanged();
+  }
   if (reconnect) {
     log(QStringLiteral("connection settings changed"));
     stopAll();
     createPeer();
     return;
   }
-  if (old.forwardSystemAudio != config.forwardSystemAudio || old.keepLocalPlayback != config.keepLocalPlayback ||
-      old.useRemoteMicrophone != config.useRemoteMicrophone ||
-      old.allowRemotePlayback != config.allowRemotePlayback ||
-      old.allowMicrophoneSharing != config.allowMicrophoneSharing || old.outputDevice != config.outputDevice ||
+  // m_config, not config: a change from the server the GUI has yet to save stays in effect.
+  if (old.forwardSystemAudio != m_config.forwardSystemAudio || old.keepLocalPlayback != m_config.keepLocalPlayback ||
+      old.useRemoteMicrophone != m_config.useRemoteMicrophone || old.outputDevice != config.outputDevice ||
       old.inputDevice != config.inputDevice) {
     log(QStringLiteral("audio settings changed"));
     if (old.outputDevice != config.outputDevice && m_playback->isRunning()) {
@@ -236,14 +260,15 @@ void AudioService::stopAll()
   m_microphone->stopFeeding();
 #endif
   m_systemSend.reset();
-  m_microphoneSend.reset();
+  m_microphoneSends.reset();
   m_playback->stop();
   m_recorder->stop();
-  m_systemReceive.reset();
+  m_mixer.setSources({});
   m_microphoneReceive.reset();
   m_peer.reset();
   m_peerWantsSystem = false;
-  m_peerWantsMicrophone = false;
+  m_microphoneLinks.clear();
+  m_sentSystemDemand.reset();
   m_sentMicrophoneDemand = false;
   m_deliveryFailing = false;
   Q_EMIT statusChanged();
@@ -270,26 +295,51 @@ void AudioService::createPeer()
   peer.name = m_config.name;
   m_peer = std::make_unique<AudioPeer>(peer);
   connect(m_peer.get(), &AudioPeer::logMessage, this, &AudioService::log);
-  connect(m_peer.get(), &AudioPeer::connected, this, [this] {
-    m_sentMicrophoneDemand = false;
-    m_deliveryFailing = false;
-    update();
-  });
-  connect(m_peer.get(), &AudioPeer::disconnected, this, [this] {
-    m_peerWantsSystem = false;
-    m_peerWantsMicrophone = false;
-    m_sentMicrophoneDemand = false;
-    update();
-  });
-  connect(m_peer.get(), &AudioPeer::demandChanged, this, [this](StreamKind kind, bool active) {
-    if (kind == StreamKind::System) {
-      m_peerWantsSystem = active;
+  connect(m_peer.get(), &AudioPeer::linkConnected, this, [this](int link) {
+    if (m_config.role == PeerConfig::Role::Client) {
+      m_sentMicrophoneDemand = false;
+      m_deliveryFailing = false;
+      sendLocalSettings();
     } else {
-      m_peerWantsMicrophone = active;
+      sendServerDemands(link);
     }
     update();
   });
-  connect(m_peer.get(), &AudioPeer::receiveStreamChanged, this, [this](StreamKind) { update(); });
+  connect(m_peer.get(), &AudioPeer::linkDisconnected, this, [this](int link) {
+    if (m_config.role == PeerConfig::Role::Client) {
+      m_peerWantsSystem = false;
+      m_sentMicrophoneDemand = false;
+    } else {
+      m_microphoneLinks.erase(link);
+    }
+    update();
+  });
+  connect(m_peer.get(), &AudioPeer::demandChanged, this, [this](int link, StreamKind kind, bool active) {
+    if (m_config.role == PeerConfig::Role::Client) {
+      if (kind == StreamKind::System) {
+        m_peerWantsSystem = active;
+      }
+    } else if (kind == StreamKind::Microphone) {
+      if (active) {
+        m_microphoneLinks.insert(link);
+      } else {
+        m_microphoneLinks.erase(link);
+      }
+    }
+    update();
+  });
+  connect(m_peer.get(), &AudioPeer::receiveStreamChanged, this, [this](int, StreamKind) { update(); });
+  connect(m_peer.get(), &AudioPeer::messageReceived, this, [this](int link, const QJsonObject &message) {
+    const auto values = shared::parse(message);
+    if (!values) {
+      return;
+    }
+    if (m_config.role == PeerConfig::Role::Client) {
+      onServerSettings(*values);
+    } else {
+      onClientSettings(link, *values);
+    }
+  });
 
   QString error;
   if (!m_peer->start(&error)) {
@@ -340,7 +390,7 @@ void AudioService::tick()
       // Probe the device; if it opens, ask for the stream again.
       updatePlayback();
     }
-    if (m_playback->isRunning() && !m_systemReceive.get()) {
+    if (m_playback->isRunning() && !m_mixer.hasSources()) {
       if (m_playbackIdleSinceMs == 0) {
         m_playbackIdleSinceMs = now;
       } else if (now - m_playbackIdleSinceMs > kIdlePlaybackMs) {
@@ -353,7 +403,7 @@ void AudioService::tick()
     }
     if (m_playback->isRunning()) {
       m_peer->setOutputLatency(StreamKind::System, m_playback->latencyMs());
-    } else if (m_systemReceive.get() && now - m_lastPlaybackAttemptMs >= kRetryMs) {
+    } else if (m_mixer.hasSources() && now - m_lastPlaybackAttemptMs >= kRetryMs) {
       updatePlayback(); // the device stopped by itself (unplugged)
     }
     if (m_wantRecording && !m_recorder->isRunning() && now - m_lastRecordAttemptMs >= kRetryMs) {
@@ -521,25 +571,39 @@ void AudioService::updateMicrophoneFeed()
 
 // --- server --------------------------------------------------------------
 
-void AudioService::sendServerDemands()
+void AudioService::sendServerDemands(int link)
 {
-  if (!m_peer || !m_peer->isConnected()) {
+  if (!m_peer) {
     m_sentSystemDemand.reset();
     return;
   }
-  const bool want = m_config.allowRemotePlayback && !m_playbackFailing;
+  // Every client may send its sound unless the output device is failing, in
+  // which case they play it themselves.
+  const bool want = !m_playbackFailing;
+  if (link >= 0) {
+    m_peer->sendDemand(link, StreamKind::System, want);
+    return;
+  }
   if (m_sentSystemDemand != want) {
-    m_peer->sendDemand(StreamKind::System, want);
     m_sentSystemDemand = want;
+    m_peer->sendDemand(StreamKind::System, want);
   }
 }
 
 void AudioService::updatePlayback()
 {
-  auto stream = m_peer ? m_peer->receiveStream(StreamKind::System) : nullptr;
-  m_systemReceive.set(stream);
-  const bool probe = m_playbackFailing && m_config.allowRemotePlayback && m_peer && m_peer->isConnected();
-  if (!stream && !probe) {
+  std::vector<PlaybackMixer::Source> sources;
+  if (m_peer) {
+    for (const auto link : m_peer->links()) {
+      if (auto stream = m_peer->receiveStream(link, StreamKind::System)) {
+        sources.push_back({m_peer->peerName(link), [stream](float *out, int frames) { stream->pull(out, frames); }});
+      }
+    }
+  }
+  const bool any = !sources.empty();
+  m_mixer.setSources(std::move(sources));
+  const bool probe = m_playbackFailing && m_peer && m_peer->isConnected();
+  if (!any && !probe) {
     return; // tick() closes the device once it has been idle for a while
   }
   if (m_playback->isRunning()) {
@@ -552,7 +616,7 @@ void AudioService::updatePlayback()
       log(QStringLiteral("cannot play the audio: %1").arg(error));
       m_playbackFailing = true;
       m_playbackError = error;
-      sendServerDemands(); // so the other computer plays it itself
+      sendServerDemands(); // so the clients play it themselves
     }
     return;
   }
@@ -566,20 +630,29 @@ void AudioService::updatePlayback()
 
 void AudioService::updateRecording()
 {
-  m_wantRecording = m_peer && m_peer->isConnected() && m_config.allowMicrophoneSharing && m_peerWantsMicrophone;
+  m_wantRecording = m_peer && !m_microphoneLinks.empty();
+  auto streams = std::make_shared<std::vector<std::shared_ptr<SendStream>>>();
+  if (m_peer) {
+    for (const auto link : m_peer->links()) {
+      const bool wanted = m_microphoneLinks.count(link) > 0;
+      m_peer->setSending(link, StreamKind::Microphone, wanted);
+      if (const auto stream = wanted ? m_peer->sendStream(link, StreamKind::Microphone) : nullptr) {
+        streams->push_back(stream);
+      }
+    }
+  }
+  if (streams->empty()) {
+    m_microphoneSends.reset();
+  } else {
+    m_microphoneSends.set(streams);
+  }
   if (!m_wantRecording) {
     if (m_recorder->isRunning()) {
       m_recorder->stop();
       log(QStringLiteral("stopped sharing the microphone"));
     }
-    m_microphoneSend.reset();
-    if (m_peer) {
-      m_peer->setSending(StreamKind::Microphone, false);
-    }
     return;
   }
-  m_peer->setSending(StreamKind::Microphone, true);
-  m_microphoneSend.set(m_peer->sendStream(StreamKind::Microphone));
   if (m_recorder->isRunning()) {
     return;
   }
@@ -593,7 +666,270 @@ void AudioService::updateRecording()
     return;
   }
   m_recordError.clear();
-  log(QStringLiteral("sharing the microphone with %1").arg(m_peer->peerName()));
+  QStringList names;
+  for (const auto link : m_microphoneLinks) {
+    names << m_peer->peerName(link);
+  }
+  log(QStringLiteral("sharing the microphone with %1").arg(names.join(QStringLiteral(", "))));
+}
+
+void AudioService::setActiveComputer(const QString &name)
+{
+  if (name == m_mixer.active()) {
+    return;
+  }
+  m_mixer.setActive(name);
+  Q_EMIT statusChanged();
+}
+
+// --- shared settings -----------------------------------------------------
+
+bool AudioService::configValue(const Config &config, const QString &key)
+{
+  if (key == shared::kForwardSystemAudio) {
+    return config.forwardSystemAudio;
+  }
+  if (key == shared::kKeepLocalPlayback) {
+    return config.keepLocalPlayback;
+  }
+  return config.useRemoteMicrophone;
+}
+
+void AudioService::setConfigValue(Config &config, const QString &key, bool value)
+{
+  if (key == shared::kForwardSystemAudio) {
+    config.forwardSystemAudio = value;
+  } else if (key == shared::kKeepLocalPlayback) {
+    config.keepLocalPlayback = value;
+  } else if (key == shared::kUseRemoteMicrophone) {
+    config.useRemoteMicrophone = value;
+  }
+}
+
+void AudioService::trackLocalSettings(bool starting)
+{
+  if (m_config.role != PeerConfig::Role::Client) {
+    return;
+  }
+  const auto now = QDateTime::currentMSecsSinceEpoch();
+  bool changed = false;
+  for (const auto &key : shared::keys()) {
+    const bool value = configValue(m_config, key);
+    auto &entry = m_local[key];
+    if (starting) {
+      const auto stored = m_state->value(QStringLiteral("local/%1").arg(key));
+      entry.value = value;
+      entry.modifiedMs = m_state->value(QStringLiteral("local/%1Modified").arg(key), 0).toLongLong();
+      if (!stored.isValid() || stored.toBool() != value) {
+        changed = true;
+        if (stored.isValid()) {
+          entry.modifiedMs = now; // changed while the helper was not running
+        }
+      }
+    } else if (entry.value != value) {
+      const auto applied = m_appliedAtMs.find(key);
+      if (applied != m_appliedAtMs.end() && m_clock.elapsed() - applied->second < kUnsavedMs) {
+        setConfigValue(m_config, key, entry.value); // from the server, not saved by the GUI yet
+        continue;
+      }
+      entry = {value, now};
+      changed = true;
+    }
+  }
+  if (!changed) {
+    return;
+  }
+  for (const auto &[key, entry] : m_local) {
+    m_state->setValue(QStringLiteral("local/%1").arg(key), entry.value);
+    m_state->setValue(QStringLiteral("local/%1Modified").arg(key), entry.modifiedMs);
+  }
+  m_state->sync();
+  if (!starting) {
+    sendLocalSettings();
+  }
+}
+
+void AudioService::sendLocalSettings()
+{
+  if (!m_peer || m_config.role != PeerConfig::Role::Client) {
+    return;
+  }
+  const auto links = m_peer->links();
+  if (!links.empty()) {
+    m_peer->sendMessage(links.front(), shared::message(m_local));
+  }
+}
+
+void AudioService::onServerSettings(const shared::Values &values)
+{
+  const auto result = shared::merge(m_local, values, false);
+  bool applied = false;
+  for (const auto &key : result.fromRemote) {
+    const auto entry = result.merged.at(key);
+    m_local[key] = entry;
+    m_state->setValue(QStringLiteral("local/%1").arg(key), entry.value);
+    m_state->setValue(QStringLiteral("local/%1Modified").arg(key), entry.modifiedMs);
+    if (configValue(m_config, key) != entry.value) {
+      // In effect now; the GUI saves it, and reload() then finds nothing new.
+      setConfigValue(m_config, key, entry.value);
+      m_appliedAtMs[key] = m_clock.elapsed();
+      Q_EMIT settingRequested(QStringLiteral("audio/%1").arg(key), entry.value);
+      log(QStringLiteral("%1 turned %2 %3")
+              .arg(m_peer->peerName(), key, entry.value ? QStringLiteral("on") : QStringLiteral("off")));
+      applied = true;
+    }
+  }
+  m_state->sync();
+  if (applied) {
+    update();
+  }
+  // Our view goes back, so the server knows we have its change, or hears ours.
+  if (!result.fromRemote.isEmpty() || !result.newerHere.isEmpty()) {
+    sendLocalSettings();
+  }
+}
+
+void AudioService::loadClients()
+{
+  m_clients.clear();
+  if (m_config.role != PeerConfig::Role::Server) {
+    return;
+  }
+  m_state->beginGroup(QStringLiteral("clients"));
+  for (const auto &name : m_state->childGroups()) {
+    auto &record = m_clients[name];
+    for (const auto &key : shared::keys()) {
+      const auto value = m_state->value(QStringLiteral("%1/%2").arg(name, key));
+      if (!value.isValid()) {
+        continue;
+      }
+      record.values[key] = {
+          value.toBool(), m_state->value(QStringLiteral("%1/%2Modified").arg(name, key)).toLongLong()
+      };
+      record.reported[key] = m_state->value(QStringLiteral("%1/%2Reported").arg(name, key)).toLongLong();
+    }
+  }
+  m_state->endGroup();
+}
+
+void AudioService::saveClient(const QString &name)
+{
+  const auto &record = m_clients[name];
+  for (const auto &[key, entry] : record.values) {
+    const auto prefix = QStringLiteral("clients/%1/%2").arg(name, key);
+    const auto reported = record.reported.find(key);
+    m_state->setValue(prefix, entry.value);
+    m_state->setValue(prefix + QStringLiteral("Modified"), entry.modifiedMs);
+    m_state->setValue(prefix + QStringLiteral("Reported"), reported == record.reported.end() ? 0 : reported->second);
+  }
+  m_state->sync();
+}
+
+void AudioService::onClientSettings(int link, const shared::Values &values)
+{
+  const auto name = m_peer->peerName(link);
+  if (name.isEmpty()) {
+    return;
+  }
+  auto &record = m_clients[name];
+  // The client's own value wins when both changed at the same moment.
+  const auto result = shared::merge(record.values, values, true);
+  record.values = result.merged;
+  for (const auto &[key, entry] : values) {
+    record.reported[key] = entry.modifiedMs;
+  }
+  saveClient(name);
+  if (!result.newerHere.isEmpty()) {
+    log(QStringLiteral("sending %1 the settings changed here: %2")
+            .arg(name, result.newerHere.join(QStringLiteral(", "))));
+    m_peer->sendMessage(link, shared::message(record.values));
+  }
+  Q_EMIT statusChanged();
+}
+
+void AudioService::setClientSetting(const QString &name, const QString &key, bool value)
+{
+  if (m_config.role != PeerConfig::Role::Server || name.isEmpty() || !shared::keys().contains(key)) {
+    return;
+  }
+  auto &record = m_clients[name];
+  record.values[key] = {value, QDateTime::currentMSecsSinceEpoch()};
+  saveClient(name);
+  const auto link = m_peer ? m_peer->linkNamed(name) : -1;
+  if (link >= 0) {
+    m_peer->sendMessage(link, shared::message(record.values));
+  }
+  log(QStringLiteral("turned %1 %2 for %3%4")
+          .arg(
+              key, value ? QStringLiteral("on") : QStringLiteral("off"), name,
+              link >= 0 ? QString() : QStringLiteral(", applied when it connects")
+          ));
+  Q_EMIT statusChanged();
+}
+
+void AudioService::handleCommand(const QString &line)
+{
+  const auto space = line.indexOf(' ');
+  const auto command = space < 0 ? line : line.left(space);
+  const auto argument = space < 0 ? QJsonObject() : QJsonDocument::fromJson(line.mid(space + 1).toUtf8()).object();
+  if (command == QStringLiteral("ACTIVE")) {
+    setActiveComputer(argument.value(QStringLiteral("name")).toString());
+  } else if (command == QStringLiteral("SET_CLIENT")) {
+    setClientSetting(
+        argument.value(QStringLiteral("name")).toString(), argument.value(QStringLiteral("key")).toString(),
+        argument.value(QStringLiteral("value")).toBool()
+    );
+  } else if (!command.isEmpty()) {
+    log(QStringLiteral("unknown command from the GUI: %1").arg(command));
+  }
+}
+
+QJsonArray AudioService::clientsStatus() const
+{
+  QStringList names;
+  for (const auto &[name, record] : m_clients) {
+    names << name;
+  }
+  if (m_peer) {
+    for (const auto link : m_peer->links()) {
+      if (!names.contains(m_peer->peerName(link))) {
+        names << m_peer->peerName(link);
+      }
+    }
+  }
+  names.sort(Qt::CaseInsensitive);
+  QJsonArray clients;
+  for (const auto &name : names) {
+    const auto link = m_peer ? m_peer->linkNamed(name) : -1;
+    QJsonObject client{{"name", name}, {"online", link >= 0}};
+    QJsonObject settings;
+    QJsonArray pending;
+    if (const auto it = m_clients.find(name); it != m_clients.end()) {
+      for (const auto &[key, entry] : it->second.values) {
+        settings.insert(key, entry.value);
+        const auto reported = it->second.reported.find(key);
+        if (reported == it->second.reported.end() || reported->second < entry.modifiedMs) {
+          pending.append(key);
+        }
+      }
+    }
+    client.insert(QStringLiteral("settings"), settings);
+    client.insert(QStringLiteral("pending"), pending);
+    if (link >= 0) {
+      client.insert(QStringLiteral("roundTripMs"), m_peer->roundTripMs(link));
+      client.insert(QStringLiteral("microphone"), m_microphoneLinks.count(link) > 0);
+      if (const auto stream = m_peer->receiveStream(link, StreamKind::System)) {
+        client.insert(QStringLiteral("sending"), true);
+        client.insert(QStringLiteral("audible"), m_mixer.isAudible(name));
+        client.insert(QStringLiteral("receive"), receiveSummary(*stream));
+        if (const auto latency = m_peer->latencyMs(link, StreamKind::System)) {
+          client.insert(QStringLiteral("latencyMs"), *latency);
+        }
+      }
+    }
+    clients.append(client);
+  }
+  return clients;
 }
 
 // --- status --------------------------------------------------------------
@@ -609,7 +945,11 @@ QJsonObject AudioService::status() const
   const bool connected = m_peer && m_peer->isConnected();
   status.insert(QStringLiteral("connected"), connected);
   if (connected) {
-    status.insert(QStringLiteral("peer"), m_peer->peerName());
+    QStringList names;
+    for (const auto link : m_peer->links()) {
+      names << m_peer->peerName(link);
+    }
+    status.insert(QStringLiteral("peer"), names.join(QStringLiteral(", ")));
     status.insert(QStringLiteral("roundTripMs"), m_peer->roundTripMs());
   }
 
@@ -669,41 +1009,28 @@ QJsonObject AudioService::status() const
       }
     }
   } else {
-    QString state = QStringLiteral("off");
-    if (m_config.allowRemotePlayback) {
-      if (m_playbackFailing) {
-        state = QStringLiteral("error");
-      } else if (m_systemReceive.get() && m_playback->isRunning()) {
-        state = QStringLiteral("playing");
-      } else {
-        state = QStringLiteral("idle");
-      }
+    QString state = QStringLiteral("idle");
+    if (m_playbackFailing) {
+      state = QStringLiteral("error");
+    } else if (m_mixer.hasSources() && m_playback->isRunning()) {
+      state = QStringLiteral("playing");
     }
     system.insert(QStringLiteral("state"), state);
     if (m_playback->isRunning()) {
       system.insert(QStringLiteral("device"), m_playback->deviceName());
     }
-    if (const auto stream = m_systemReceive.get()) {
-      system.insert(QStringLiteral("receive"), receiveSummary(*stream));
-    }
     if (m_playbackFailing) {
       system.insert(QStringLiteral("error"), m_playbackError);
     }
-    if (connected) {
-      if (const auto latency = m_peer->latencyMs(StreamKind::System)) {
-        system.insert(QStringLiteral("latencyMs"), *latency);
-      }
-    }
+    system.insert(
+        QStringLiteral("mixMode"),
+        m_mixer.mode() == PlaybackMixer::Mode::Mix ? QStringLiteral("mix") : QStringLiteral("followCursor")
+    );
+    system.insert(QStringLiteral("active"), m_mixer.active());
 
-    QString micState = QStringLiteral("off");
-    if (m_config.allowMicrophoneSharing) {
-      if (!m_wantRecording) {
-        micState = QStringLiteral("idle");
-      } else if (m_recorder->isRunning()) {
-        micState = QStringLiteral("sharing");
-      } else {
-        micState = QStringLiteral("error");
-      }
+    QString micState = QStringLiteral("idle");
+    if (m_wantRecording) {
+      micState = m_recorder->isRunning() ? QStringLiteral("sharing") : QStringLiteral("error");
     }
     microphone.insert(QStringLiteral("state"), micState);
     if (m_recorder->isRunning()) {
@@ -712,6 +1039,7 @@ QJsonObject AudioService::status() const
     if (!m_recordError.isEmpty()) {
       microphone.insert(QStringLiteral("error"), m_recordError);
     }
+    status.insert(QStringLiteral("clients"), clientsStatus());
   }
   status.insert(QStringLiteral("system"), system);
   status.insert(QStringLiteral("microphone"), microphone);
