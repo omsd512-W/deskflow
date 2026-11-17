@@ -7,10 +7,11 @@
 #include "AudioPeerTests.h"
 
 #include "audio/AudioPeer.h"
+#include "audio/UdpSocket.h"
 
+#include <QRandomGenerator>
 #include <QSignalSpy>
 #include <QTcpServer>
-#include <QUdpSocket>
 
 #include <cmath>
 #include <memory>
@@ -20,17 +21,23 @@ using namespace deskflow::audio;
 
 namespace {
 
-//! A port free for both TCP and UDP right now.
+//! A port free for both UDP and TCP right now.
+/*!
+Picked at random below the ephemeral range. Windows reserves runs of hundreds of
+ports for one protocol only (Hyper-V, WSL), and hands out ephemeral ports in
+sequence, so every port it offers can fall in such a run. Claimed the way
+AudioPeer claims it, UDP first and with the same socket.
+*/
 quint16 freePort()
 {
-  for (int attempt = 0; attempt < 20; ++attempt) {
-    QTcpServer tcp;
-    if (!tcp.listen(QHostAddress::Any, 0)) {
+  for (int attempt = 0; attempt < 50; ++attempt) {
+    const auto port = static_cast<quint16>(QRandomGenerator::global()->bounded(20000, 49000));
+    UdpSocket udp;
+    if (!udp.bind(port)) {
       continue;
     }
-    const auto port = tcp.serverPort();
-    QUdpSocket udp;
-    if (udp.bind(QHostAddress::Any, port)) {
+    QTcpServer tcp;
+    if (tcp.listen(QHostAddress::Any, port)) {
       return port;
     }
   }
@@ -131,9 +138,13 @@ void AudioPeerTests::test_streamsBothWays()
   QVERIFY(server.remoteStats(StreamKind::System).value("packets").toDouble() > 0);
   QTRY_VERIFY_WITH_TIMEOUT(server.roundTripMs() > 0, 5000);
 
-  // Same machine, same clock: the offset estimate is close to zero.
+  // Same machine, same clock: the offset estimate settles close to zero. It can be
+  // off by half a round trip, and the first pings are slow on a busy machine, so
+  // give it a few more pings to find a quick exchange.
   QTRY_VERIFY(client.clockOffsetUs().has_value());
-  QVERIFY2(std::llabs(*client.clockOffsetUs()) < 5000, qPrintable(QString::number(*client.clockOffsetUs())));
+  QTRY_VERIFY2_WITH_TIMEOUT(
+      std::llabs(*client.clockOffsetUs()) < 5000, qPrintable(QString::number(*client.clockOffsetUs())), 5000
+  );
   // Capture-to-playout latency: the jitter buffer plus this loop's pacing.
   QTRY_VERIFY_WITH_TIMEOUT(client.latencyMs(StreamKind::System).has_value(), 3000);
   const double latency = *client.latencyMs(StreamKind::System);
