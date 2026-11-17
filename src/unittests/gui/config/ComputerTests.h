@@ -1,5 +1,6 @@
 /*
  * Deskflow -- mouse and keyboard sharing utility
+ * SPDX-FileCopyrightText: (C) 2026 Deskflow Developers
  * SPDX-FileCopyrightText: (C) 2025 Chris Rizzitello <sithlord48@gmail.com>
  * SPDX-License-Identifier: GPL-2.0-only WITH LicenseRef-OpenSSL-Exception
  */
@@ -13,6 +14,10 @@ private Q_SLOTS:
   // Test are run in order top to bottom
   void initTestCase();
   void basicFunctionality();
+  void loadSettings_savedGeometry_restored();
+  void setMonitors_desktopRects_storedRelativeToGeometry();
+  void loadSettings_savedMonitors_restored();
+  void loadSettings_savedMouseSpeed_restored();
 
 private:
   inline static const QString m_settingsPath = QStringLiteral("tmp/test");

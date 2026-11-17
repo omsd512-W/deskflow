@@ -9,6 +9,7 @@
 #pragma once
 
 #include "deskflow/PlatformComputer.h"
+#include "deskflow/ShapeHole.h"
 #include "platform/MSWindowsHook.h"
 #include "platform/MSWindowsPowerManager.h"
 
@@ -91,6 +92,7 @@ public:
   int32_t getJumpZoneSize() const override;
   bool isAnyMouseButtonDown(uint32_t &buttonID) const override;
   void getCursorCenter(int32_t &x, int32_t &y) const override;
+  std::vector<deskflow::ShapeHole> getShapeHoles() const override;
 
   // ISecondaryComputer overrides
   void fakeMouseButton(ButtonID id, bool press) override;
@@ -190,6 +192,11 @@ private: // HACK
   // fix timer callback
   void handleFixes();
 
+  // notice when the low level mouse hook stops seeing the mouse and put it
+  // back, see checkMouseHook()
+  void checkMouseHook();
+  void resetMouseHookCheck();
+
   // fix the clipboard viewer chain
   void fixClipboardViewer();
 
@@ -269,9 +276,17 @@ private:
   int32_t m_h = 0;
   int32_t m_xCenter = 0;
   int32_t m_yCenter = 0;
+  // size of the primary monitor, at 0,0, whose center the cursor is parked at
+  int32_t m_wPrimary = 0;
+  int32_t m_hPrimary = 0;
 
   // true if system appears to have multiple monitors
   bool m_multimon = false;
+
+  // each monitor's rect, and the gaps they leave in the virtual desktop
+  // (e.g. the missing corner of an L-shaped arrangement)
+  std::vector<deskflow::Rect> m_monitors;
+  std::vector<deskflow::ShapeHole> m_shapeHoles;
 
   // last mouse position
   int32_t m_xCursor = 0;
@@ -289,6 +304,19 @@ private:
 
   // timer for periodically checking stuff that requires polling
   EventQueueTimer *m_fixTimer = nullptr;
+
+  // mouse hook watchdog: mouse events the hook reported, in all and at the
+  // last check, where the cursor was then, and whether the next check only
+  // records that because the cursor was moved on purpose
+  EventQueueTimer *m_hookTimer = nullptr;
+  uint64_t m_hookMouseEvents = 0;
+  uint64_t m_hookMouseEventsChecked = 0;
+  int32_t m_hookCheckX = 0;
+  int32_t m_hookCheckY = 0;
+  bool m_hookCheckBaseline = true;
+  HWND m_foregroundAtLeave = nullptr;
+  uint32_t m_hookLosses = 0;
+  double m_hookLossLoggedAt = 0;
 
   // the keyboard layout to use when off primary computer
   HKL m_keyLayout = nullptr;

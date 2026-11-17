@@ -136,6 +136,66 @@ p, li { white-space: pre-wrap; }
     </message>
 </context>
 <context>
+    <name>AudioSettingsWidget</name>
+    <message>
+        <source>When this computer is a client</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play this computer&apos;s sound on the server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep playing it on this computer too</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use the server&apos;s microphone (appears as the input &quot;Deskflow 麦克风&quot;)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Deskflow microphone driver is not installed, so the server&apos;s microphone cannot appear on this computer.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When this computer is the server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play sound sent by clients</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play on</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Let clients use this computer&apos;s microphone</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Record from</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>System default</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio port</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sound and microphone audio travel encrypted over TCP and UDP on the audio port, which the server&apos;s firewall must allow. They only go to computers Deskflow already trusts.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 (not connected)</source>
+        <extracomment>A saved audio device that is not connected right now</extracomment>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ClientConfigDialog</name>
     <message>
         <source>Client Configuration</source>
@@ -309,6 +369,38 @@ p, li { white-space: pre-wrap; }
         <translation type="unfinished">&amp;Rimuovi</translation>
     </message>
     <message>
+        <source>Size in layout</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> px</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use the computer&apos;s screen resolution to line it up pixel for pixel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Width</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Height</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mouse</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>How far the cursor moves on this computer for the same mouse movement, compared with the server. Raise it if the cursor feels slower here, e.g. because this computer&apos;s screen has smaller pixels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Speed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Computer name is empty</source>
         <translation type="unfinished">Il nome del computer è vuoto.</translation>
     </message>
@@ -323,13 +415,6 @@ p, li { white-space: pre-wrap; }
     <message>
         <source>The computer name cannot be the same as an alias. Please either remove the alias or change the computer name.</source>
         <translation type="unfinished">Il nome del computer non può coincidere con un alias. Rimuovere l&apos;alias o modificare il nome del computer.</translation>
-    </message>
-</context>
-<context>
-    <name>ComputerSetupModel</name>
-    <message>
-        <source>&lt;center&gt;Computer: &lt;b&gt;%1&lt;/b&gt;&lt;/center&gt;&lt;br&gt;Double click to edit settings&lt;br&gt;Drag computer to the trashcan to remove it</source>
-        <translation type="unfinished">&lt;center&gt;Computer: &lt;b&gt;%1&lt;/b&gt;&lt;/center&gt;&lt;br&gt;Fai doppio clic per modificare le impostazioni&lt;br&gt;Trascina il computer nel cestino per rimuoverlo</translation>
     </message>
 </context>
 <context>
@@ -921,6 +1006,18 @@ Inoltre, verifica di poter %1 il file di configurazione del server: %2</translat
         <source>Super</source>
         <translation type="unfinished">Super</translation>
     </message>
+    <message>
+        <source>&lt;br&gt;Its monitors are arranged in the system display settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;br&gt;Drag the bottom right corner to resize, or set the size in pixels in its settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;center&gt;Computer: &lt;b&gt;%1&lt;/b&gt;&lt;/center&gt;&lt;br&gt;Drag next to another computer to link their edges%2&lt;br&gt;Double click to edit settings&lt;br&gt;Drag computer to the trashcan to remove it</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>SearchWidget</name>
@@ -1208,6 +1305,10 @@ L&apos;abilitazione di questa impostazione disabiliterà l&apos;interfaccia graf
         <translation>Certificato TLS rigenerato</translation>
     </message>
     <message>
+        <source>A&amp;udio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>TLS certificate regenerated successfully.</source>
         <translation>Certificato TLS rigenerato correttamente.</translation>
     </message>
@@ -1390,6 +1491,101 @@ L&apos;abilitazione di questa impostazione disabiliterà l&apos;interfaccia graf
     <message>
         <source>Encryption Disabled</source>
         <translation>Crittografia disabilitata</translation>
+    </message>
+</context>
+<context>
+    <name>deskflow::gui::AudioControl</name>
+    <message>
+        <source>&amp;Audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play this computer&apos;s sound on the server</source>
+        <extracomment>Switch A: the Mac&apos;s sound plays on the server&apos;s headset</extracomment>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep playing it here too</source>
+        <extracomment>Switch B: keep the Mac&apos;s own speakers playing as well</extracomment>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use the server&apos;s microphone</source>
+        <extracomment>Switch C: the server&apos;s microphone appears on this Mac as an input device</extracomment>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play sound sent by clients</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Share this computer&apos;s microphone with clients</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio sharing is off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio: starting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>waiting for the server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>sound on %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 is not playing sound</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>sound not reaching %1, playing here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>cannot record this computer&apos;s sound</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>microphone of %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>microphone driver not installed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>playing sound from %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>cannot play sound</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>connected to %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>waiting for a client</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>microphone shared</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>cannot record the microphone</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio: %1</source>
+        <extracomment>Status bar text, followed by a list such as &quot;sound on Windows-PC (35 ms)&quot;</extracomment>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

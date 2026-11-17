@@ -61,6 +61,14 @@ enum
 
 static const double kCarbonLoopWaitTimeout = 10.0;
 
+// how long the hidden cursor stays where it left before it's parked
+static const double kParkCursorDelay = 2.0;
+
+// how often the hidden cursor is checked after leaving, until how long after
+// it's parked
+static const double kHideCursorInterval = 0.02;
+static const double kHideCursorAfterPark = 0.5;
+
 // Synthetic mouse button and drag events require event numbers on macOS 27 and later.
 static inline bool needsEventNumber()
 {
@@ -74,6 +82,7 @@ std::string getProcessName(int pid);
 void setZeroSuppressionInterval();
 void avoidSupression();
 void logCursorVisibility();
+bool isDockOnRight();
 void avoidHesitatingCursor();
 
 //
@@ -97,6 +106,8 @@ OSXComputer::OSXComputer(IEventQueue *events, bool isPrimary, bool enableLangSyn
       m_ownClipboard(false),
       m_clipboardTimer(nullptr),
       m_axTimer(nullptr),
+      m_parkCursorTimer(nullptr),
+      m_hideCursorTimer(nullptr),
       m_hiddenWindow(nullptr),
       m_userInputWindow(nullptr),
       m_switchEventHandlerRef(0),
@@ -784,11 +795,14 @@ void OSXComputer::disable()
     m_axTimer = nullptr;
   }
 
+  cancelParkCursor();
+
   m_isOnComputer = m_isPrimary;
 }
 
 void OSXComputer::enter()
 {
+  cancelParkCursor();
   m_isOnComputer = true;
   showCursor();
 
@@ -827,10 +841,84 @@ void OSXComputer::leave()
     // a client (onMouseMove reads raw deltas instead). must follow hideCursor(),
     // which re-associates. re-coupled in enter()/disable().
     CGAssociateMouseAndMouseCursorPosition(false);
+  } else {
+    // left where it crossed the edge, the hidden cursor keeps the dock
+    // revealed, or a hot corner triggered, until it comes back. park it a
+    // while later rather than now, so the dock doesn't vanish the moment the
+    // cursor leaves.
+    cancelParkCursor();
+    m_parkCursorTimer = m_events->newOneShotTimer(kParkCursorDelay, nullptr);
+    m_events->addHandler(EventTypes::Timer, m_parkCursorTimer, [this](const auto &) { parkCursor(); });
+
+    // the dock keeps the cursor shown while it's revealed, however it's
+    // hidden, so keep hiding it until a little after it's parked
+    m_hideCursorUntil = ARCH->time() + kParkCursorDelay + kHideCursorAfterPark;
+    m_hideCursorTimer = m_events->newTimer(kHideCursorInterval, nullptr);
+    m_events->addHandler(EventTypes::Timer, m_hideCursorTimer, [this](const auto &) { keepCursorHidden(); });
   }
 
   // now off computer
   m_isOnComputer = false;
+}
+
+void OSXComputer::parkCursor()
+{
+  stopTimer(m_parkCursorTimer);
+
+  // not while a button is down, which would drag
+  if (m_isOnComputer || m_buttonState.getFirstButtonDown() != -1) {
+    return;
+  }
+
+  // the dock only goes once it sees the cursor go, with a real motion event
+  // rather than a warp, and keeps it shown until then. so move it halfway
+  // along an edge the dock isn't on, the right one or else the bottom one:
+  // the cursor image hangs right and down from its hot spot, so all but a
+  // sliver of it is off screen until it can be hidden again. the next enter
+  // moves it to the entry point.
+  CGDirectDisplayID display = CGMainDisplayID();
+  uint32_t count = 0;
+  CGGetDisplaysWithPoint(CGPointMake(m_xCursor, m_yCursor), 1, &display, &count);
+  const CGRect bounds = CGDisplayBounds(display);
+  const auto right = static_cast<int32_t>(CGRectGetMaxX(bounds)) - 1;
+  const auto bottom = static_cast<int32_t>(CGRectGetMaxY(bounds)) - 1;
+  if (isDockOnRight()) {
+    fakeMouseMove(static_cast<int32_t>(CGRectGetMidX(bounds)), bottom);
+  } else {
+    fakeMouseMove(right, static_cast<int32_t>(CGRectGetMidY(bounds)));
+  }
+}
+
+void OSXComputer::keepCursorHidden()
+{
+  // only for a while: a local mouse on this computer should show it
+  if (m_isOnComputer || ARCH->time() >= m_hideCursorUntil) {
+    stopTimer(m_hideCursorTimer);
+    return;
+  }
+
+  // CGCursorIsVisible() is deprecated, but tells when something has shown it
+  if (CGCursorIsVisible()) {
+    // hiding takes the cursor back from whatever has shown it. show first so
+    // the hide count stays at one and enter() still shows it.
+    CGDisplayShowCursor(m_displayID);
+    CGDisplayHideCursor(m_displayID);
+  }
+}
+
+void OSXComputer::cancelParkCursor()
+{
+  stopTimer(m_parkCursorTimer);
+  stopTimer(m_hideCursorTimer);
+}
+
+void OSXComputer::stopTimer(EventQueueTimer *&timer)
+{
+  if (timer != nullptr) {
+    m_events->removeHandler(EventTypes::Timer, timer);
+    m_events->deleteTimer(timer);
+    timer = nullptr;
+  }
 }
 
 bool OSXComputer::setClipboard(ClipboardID, const IClipboard *src)
@@ -1914,6 +2002,17 @@ void avoidSupression()
       (kCGEventFilterMaskPermitLocalKeyboardEvents | kCGEventFilterMaskPermitSystemDefinedEvents),
       kCGEventSupressionStateRemoteMouseDrag
   );
+}
+
+bool isDockOnRight()
+{
+  bool right = false;
+  if (CFPropertyListRef value = CFPreferencesCopyAppValue(CFSTR("orientation"), CFSTR("com.apple.dock"))) {
+    right = CFGetTypeID(value) == CFStringGetTypeID() &&
+            CFStringCompare(static_cast<CFStringRef>(value), CFSTR("right"), 0) == kCFCompareEqualTo;
+    CFRelease(value);
+  }
+  return right;
 }
 
 void logCursorVisibility()

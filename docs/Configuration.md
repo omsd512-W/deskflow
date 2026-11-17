@@ -146,8 +146,6 @@ This section contains options used when in server mode it will begin with `[serv
 | enableSwitchDoubleTap  | `true` or `false` | Enables the doubletap to switch method (default: false)|
 | externalConfig     | `true` or `false` | When true use the external config path |
 | externalConfigFile | Filepath          | Path the server config file if it does not exist the GUI will it generated based on the `internalConfig` section.|
-| gridHeight         | int               | Height of the server's intenal grid used for the computer layout (default: 3)|
-| gridWidth          | int               | Width of the server's intenal grid used for the computer layout (default: 5) |
 | heartbeat          | int               | The server will expect each client to send a message no less than every `N` milliseconds. If no message arrives from a client within `3N` seconds the server forces that client to disconnect. If deskflow fails to detect clients disconnecting while the server is sleeping or vice versa, try using this option.|
 | protocol           | `barrier` or `synergy` | The protocol to use when saying hello to clients. Can be set to barrier or synergy. If not set barrier is used as the default |
 |relativeMouseMoves  | `true` or `false` | If set to ''true'' then secondary computers move the mouse using relative rather than absolute mouse moves when and only when the cursor is locked to the computer (by ''Scroll Lock'' or a configured hot key). This is intended to make Deskflow work better with certain games. If set to ''false'' or not set then all mouse moves are absolute.|
@@ -165,6 +163,7 @@ Each computer will have a section where its configuration will be stored, if the
 |:-----------------------|:-----------------:|:-----------|
 | aliases                | Comma separated list of hostnames | Names here will be used as alternatives for the computer. Names must be valid hostnames. |
 | name                   | Valid hostname    | The name of the client. |
+| geometry               | Rect              | Position and size of the computer in the server's layout, `@Rect(x y width height)`. Unless an external server config is used, the server links the computers whose edges touch. |
 | halfDuplexCapsLock     | `true` or `false` | This computer has a ''Caps Lock'' key that doesn't report a press and a release event when the user presses it but instead reports a press event when it's turned on and a release event when it's turned off. If ''Caps Lock'' acts strangely on all computers then you may need to set this option to true on the server. If it acts strangely on one computer then that computer may need the option set to true.|
 | halfDuplexNumLock      | `true` or `false` | This computer has a ''Num Lock'' key that doesn't report a press and a release event when the user presses it but instead reports a press event when it's turned on and a release event when it's turned off. If ''Num Lock'' acts strangely on all computers then you may need to set this option to true on the server. If it acts strangely on one computer then that computer may need the option set to true.|
 | halfDuplexScrollLock   | `true` or `false` | This computer has a ''Scroll Lock'' key that doesn't report a press and a release event when the user presses it but instead reports a press event when it's turned on and a release event when it's turned off. If ''Scroll Lock'' acts strangely on all computers then you may need to set this option to true on the server. If it acts strangely on one computer then that computer may need the option set to true.|
@@ -242,6 +241,8 @@ The file is parsed top to bottom and names cannot be used before they've been de
 
 ### links secion
 
+This section is only read from an external server config. Otherwise the links come from the `geometry` of each computer in the general config.
+
 ''args'' is a list of computer names just like in the ''screens'' section except each computer is followed by a list of links, one per line. Each link has the form:
 ```
  {left|right|up|down}[<range>] = name[<range>]
@@ -270,6 +271,31 @@ end
 This indicates that computer ''larry'' is to the right of computer ''moe'' (so moving the cursor off the right edge of ''moe'' would make it appear at the left edge of ''larry''), the left half of curly is above the right half of ''moe'', ''moe'' is to the left of ''larry'' (edges are not necessarily symmetric so you have to provide both directions), the right half of curly is above the left half of ''larry'', all of ''moe'' is below the left half of ''curly'', and the left half of ''larry'' is below the right half of ''curly''.
 
 Note that links do not have to be symmetrical; for instance, here the edge between ''moe'' and ''curly'' maps to different ranges depending on if you're going up or down. In fact links don't have to be bidirectional. You can configure the right of ''moe'' to go to ''larry'' without a link from the left of ''larry'' to ''moe''. It's possible to configure a computer with no outgoing links; the cursor will get stuck on that computer unless you have a hot key configured to switch off of that computer.
+
+#### hole-location links
+
+If the server's own monitors don't form a perfect rectangle (for example, three monitors arranged in an L, or four arranged in a T), each missing area is called a ''hole''. Instead of a directional link, you can link a hole directly to a computer so that its screen fills the gap:
+```
+ {top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} = name
+```
+```
+section: links
+	Desktop1:
+		bottom-right = Laptop
+end
+```
+This says that whenever Desktop1's monitors leave a gap in its bottom-right corner, ''Laptop'''s screen should be treated as filling it, so moving the cursor into that gap switches to ''Laptop'' (and moving back off the matching edge of ''Laptop'' returns to Desktop1).
+
+A hole-location link differs from a directional link in a few ways:
+
+* It has no range: the hole's exact position, size and which side(s) of it border real monitors are all worked out from the server's actual monitor layout at runtime, not configured by hand.
+* The return link, from the other computer back onto the server, is added automatically; you only need to write the one line above, not both directions.
+* It only has an effect on a server platform that can report an irregular monitor layout to deskflow (currently Linux/Wayland and Windows). On other platforms, or if the named hole isn't actually present in the server's layout, the entry is accepted but logged as unused and has no effect.
+* Hole-location links are only meaningful on the server's own section, since only the server's own screen shape can have a hole; one written under any other computer's section is silently ignored.
+* If the server's monitor layout changes after startup (a monitor is added, removed or moved), the hole (probably) will not be detected so a restart is needed. This seems to be a limitation in some systems e.g. KWin. 
+
+Also note that for holes to be useable, they have to have a unique border geometry e.g. in an L-Shaped setup, the left layout of the top-right monitor, and the bottom-right monitor
+should not be aligned exactly on the left edge, nor should the top-left and top-right monitors be aligned eactly on their bottom edge. A reasonable configuration may be the top left monitor being a few pixels below the top-right monitor, and the bottom-right monitor slightly overlapping the top-left monitor. This avoids a known limitation where an edge geometry is not valid if it is exactly the same for multiple monitors.
 
 ### options section
 

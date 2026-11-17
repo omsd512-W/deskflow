@@ -47,6 +47,10 @@ if(WIN32)
   endif()
 endif()
 
+add_subdirectory(deskflow-audio)
+if(APPLE)
+  add_subdirectory(deskflow-mic-driver)
+endif()
 add_subdirectory(deskflow-core)
 add_subdirectory(deskflow-daemon) #Only used on windows
 add_subdirectory(deskflow-gui)

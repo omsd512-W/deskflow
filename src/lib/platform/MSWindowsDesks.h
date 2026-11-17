@@ -87,6 +87,12 @@ public:
   */
   void leave(HKL keyLayout);
 
+  //! Wait for the cursor to be hidden
+  /*!
+  Waits briefly, after leave(), until the cursor is no longer drawn.
+  */
+  void waitForHiddenCursor() const;
+
   //! Notify of options changes
   /*!
   Resets all options to their default values.
@@ -120,6 +126,13 @@ public:
   \p install is false then the screensaver hooks are uninstalled.
   */
   void installScreensaverHooks(bool install);
+
+  //! Reinstall the low level mouse hook
+  /*!
+  For when it stops seeing the mouse, see MSWindowsHook::reinstallMouseHook().
+  Returns false if the desk has no low level hooks to reinstall.
+  */
+  bool reinstallMouseHook();
 
   //! Start ignoring user input
   /*!
@@ -185,6 +198,8 @@ private:
     DWORD m_targetID;
     HDESK m_desk;
     HWND m_window;
+    // hides the cursor where it leaves the primary, until it's warped to m_window
+    HWND m_edgeWindow = nullptr;
     HWND m_foregroundWindow;
     bool m_lowLevel;
     bool m_hasRelativeRestorePosition = false;

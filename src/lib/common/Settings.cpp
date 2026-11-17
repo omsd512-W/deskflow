@@ -343,6 +343,12 @@ QVariant Settings::defaultValue(const QString &key)
   if (key == Core::Port)
     return 24800;
 
+  if (key == Audio::Port)
+    return Settings::value(Core::Port).toInt() + 1;
+
+  if (key == Audio::OutputDevice || key == Audio::InputDevice)
+    return QString();
+
   if (key == Core::ProcessMode) {
 #ifdef Q_OS_WIN
     if (!Settings::isPortableMode())
@@ -520,6 +526,8 @@ QVariant Settings::computerDefaults(const QString &key)
     return false;
   if (key.endsWith("switchCornerSize"))
     return 0;
+  if (key.endsWith("mouseSpeed"))
+    return 100;
   if (key == "modifierAlt")
     return keyboardModifierToOption(KeyboardModifier::Alt);
   if (key == "modifierAltGr")

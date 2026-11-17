@@ -10,6 +10,7 @@
 
 #include "base/IEventQueue.h"
 #include "common/KeyboardModifier.h"
+#include "common/LayoutLinks.h"
 #include "deskflow/KeyMap.h"
 #include "deskflow/KeyTypes.h"
 #include "deskflow/OptionTypes.h"
@@ -24,6 +25,51 @@
 using namespace deskflow::string;
 
 namespace deskflow::server {
+
+namespace {
+
+Direction toDirection(deskflow::layout::Side side)
+{
+  using enum deskflow::layout::Side;
+  switch (side) {
+  case Left:
+    return Direction::Left;
+  case Right:
+    return Direction::Right;
+  case Up:
+    return Direction::Top;
+  case Down:
+    return Direction::Bottom;
+  }
+  return Direction::NoDirection;
+}
+
+void connectByGeometry(Config &config, const QStringList &computers)
+{
+  // A computer laid out by its monitors (the server) links on each monitor's edges, so a neighbour can sit
+  // against an inner edge of an L-shaped arrangement.
+  QMap<QString, QList<QRect>> placed;
+  for (const auto &computer : computers) {
+    const auto geometry = Settings::value(Settings::Computer::Geometry.arg(computer)).toRect();
+    if (computer.isEmpty() || !geometry.isValid())
+      continue;
+    const auto monitors =
+        deskflow::layout::rectsFromVariant(Settings::value(Settings::Computer::Monitors.arg(computer)));
+    placed.insert(computer, deskflow::layout::placedRects(geometry, monitors));
+  }
+
+  for (const auto &link : deskflow::layout::computeLinks(placed)) {
+    if (!config.connect(
+            link.from.toStdString(), toDirection(link.side), static_cast<float>(link.fromStart / 100),
+            static_cast<float>(link.fromEnd / 100), link.to.toStdString(), static_cast<float>(link.toStart / 100),
+            static_cast<float>(link.toEnd / 100)
+        )) {
+      qWarning("failed to link '%s' to '%s'", qPrintable(link.from), qPrintable(link.to));
+    }
+  }
+}
+
+} // namespace
 //
 // Config
 //
@@ -72,6 +118,7 @@ bool Config::addComputer(const std::string &name)
   addOption(
       name, kOptionComputerX11WeakFocus, Settings::value(Settings::Computer::WeakX11Focus.arg(computer)).toBool()
   );
+  addOption(name, kOptionComputerMouseSpeed, Settings::value(Settings::Computer::MouseSpeed.arg(computer)).toInt());
 
   OptionValue cornerValue = s_noCornerMask;
   if (Settings::value(Settings::Computer::SwitchCornerTopLeft.arg(computer)).toBool()) {
@@ -188,6 +235,25 @@ bool Config::disconnect(const std::string &srcName, Direction srcSide, float pos
   index->second.remove(srcSide, position);
 
   return true;
+}
+
+bool Config::addHoleLink(const std::string &srcName, deskflow::HoleLocation location, const std::string &dstName)
+{
+  if (!isComputer(srcName) || !isComputer(dstName)) {
+    return false;
+  }
+
+  m_holeLinks[getCanonicalName(srcName)].push_back({location, dstName});
+  return true;
+}
+
+std::vector<Config::HoleLink> Config::getHoleLinks(const std::string &srcName) const
+{
+  const auto index = m_holeLinks.find(getCanonicalName(srcName));
+  if (index == m_holeLinks.end()) {
+    return {};
+  }
+  return index->second;
 }
 
 void Config::setDeskflowAddress(const NetworkAddress &addr)
@@ -439,6 +505,15 @@ bool Config::operator==(const Config &x) const
     return false;
   }
 
+  // compare hole links
+  if (m_holeLinks != x.m_holeLinks) {
+    return false;
+  }
+
+  if (m_restartServerOnZoneChange != x.m_restartServerOnZoneChange) {
+    return false;
+  }
+
   return true;
 }
 
@@ -463,6 +538,8 @@ void Config::read(ConfigReadContext &context)
   while (context.getStream()) {
     tmp.readSection(context);
   }
+  if (!Settings::value(Settings::Server::ExternalConfig).toBool())
+    connectByGeometry(tmp, computers);
   *this = tmp;
 }
 
@@ -570,8 +647,16 @@ void Config::readSectionOptions(ConfigReadContext &s)
   while (s.readLine(line)) {
     if (line == "end") {
       return;
-    } else if (const auto l = QString::fromStdString(line).simplified();
-               !l.startsWith(QStringLiteral("keystroke")) && !l.startsWith(QStringLiteral("mousepress"))) {
+    }
+
+    const auto l = QString::fromStdString(line).simplified();
+    if (l.startsWith(QStringLiteral("restartServerOnZoneChange"))) {
+      const auto parts = l.split(QLatin1Char('='));
+      const auto value = parts.size() > 1 ? parts[1].trimmed().toLower() : QString();
+      m_restartServerOnZoneChange = (value == QStringLiteral("true") || value == QStringLiteral("1"));
+      continue;
+    }
+    if (!l.startsWith(QStringLiteral("keystroke")) && !l.startsWith(QStringLiteral("mousepress"))) {
       continue;
     }
 
@@ -685,7 +770,14 @@ void Config::readSectionLinks(ConfigReadContext &s)
       Interval srcInterval(s.parseInterval(srcArgs));
       Interval dstInterval(s.parseInterval(dstArgs));
 
-      // handle argument
+      if (!isComputer(dstComputer)) {
+        throw ServerConfigReadException(s, "unknown computer name \"%{1}\"", dstComputer);
+      }
+
+      // handle argument: either a direction (left/right/up/down), linking a
+      // whole edge or an interval of one, or the name of a shape hole (e.g.
+      // "bottom-right"), linking that whole hole once its actual position is
+      // known at runtime
       using enum Direction;
       Direction dir;
       if (side == "left") {
@@ -696,12 +788,12 @@ void Config::readSectionLinks(ConfigReadContext &s)
         dir = Top;
       } else if (side == "down") {
         dir = Bottom;
+      } else if (const auto location = deskflow::parseHoleLocation(side); location.has_value()) {
+        addHoleLink(computer, *location, dstComputer);
+        continue;
       } else {
         // unknown argument
         throw ServerConfigReadException(s, "unknown side \"%{1}\" in link", side);
-      }
-      if (!isComputer(dstComputer)) {
-        throw ServerConfigReadException(s, "unknown computer name \"%{1}\"", dstComputer);
       }
       if (!connect(
               computer, dir, srcInterval.first, srcInterval.second, dstComputer, dstInterval.first, dstInterval.second

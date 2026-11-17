@@ -39,7 +39,8 @@ enum EHookMode
 {
   kHOOK_DISABLE,
   kHOOK_WATCH_JUMP_ZONE,
-  kHOOK_RELAY_EVENTS
+  kHOOK_RELAY_EVENTS,
+  kHOOK_HOLD_CURSOR // eat mouse motion only, while leaving the computer
 };
 
 //! Loads and provides functions for the Windows hook
@@ -70,6 +71,14 @@ public:
   static EHookResult install();
 
   static int uninstall();
+
+  //! Put the low level mouse hook back at the head of the hook chain
+  /*!
+  Windows drops a low level hook without telling us when the thread that
+  installed it stalls, and a later hook that doesn't call the next one hides
+  events from it. Must run on the thread that called install().
+  */
+  static bool reinstallMouseHook();
 
   static int installScreenSaver();
 

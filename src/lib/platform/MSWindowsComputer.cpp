@@ -28,8 +28,11 @@
 #include "platform/MSWindowsKeyState.h"
 #include "platform/MSWindowsScreenSaver.h"
 
+#include <QString>
 #include <Shlobj.h>
 #include <algorithm>
+#include <cstdlib>
+#include <string>
 #include <comutil.h>
 #include <string.h>
 
@@ -71,6 +74,30 @@
 #if !defined(PBT_APMRESUMEAUTOMATIC)
 #define PBT_APMRESUMEAUTOMATIC 0x0012
 #endif
+
+namespace {
+
+// the executable that owns a window, for the log
+std::string foregroundProcessName(HWND window)
+{
+  DWORD pid = 0;
+  if (window == nullptr || GetWindowThreadProcessId(window, &pid) == 0) {
+    return "nothing";
+  }
+  std::string name = "pid " + std::to_string(pid);
+  if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid); process != nullptr) {
+    wchar_t path[MAX_PATH];
+    DWORD size = MAX_PATH;
+    if (QueryFullProcessImageNameW(process, 0, path, &size)) {
+      const std::wstring full(path, size);
+      name = QString::fromStdWString(full.substr(full.find_last_of(L'\\') + 1)).toStdString();
+    }
+    CloseHandle(process);
+  }
+  return name;
+}
+
+} // namespace
 
 //
 // MSWindowsComputer
@@ -197,6 +224,12 @@ void MSWindowsComputer::enable()
 
     // watch jump zones
     m_hook.setMode(kHOOK_WATCH_JUMP_ZONE);
+
+    if (m_useHooks) {
+      resetMouseHookCheck();
+      m_hookTimer = m_events->newTimer(0.25, nullptr);
+      m_events->addHandler(EventTypes::Timer, m_hookTimer, [this](const auto &) { checkMouseHook(); });
+    }
   }
 }
 
@@ -230,6 +263,11 @@ void MSWindowsComputer::disable()
     m_events->deleteTimer(m_fixTimer);
     m_fixTimer = nullptr;
   }
+  if (m_hookTimer != nullptr) {
+    m_events->removeHandler(EventTypes::Timer, m_hookTimer);
+    m_events->deleteTimer(m_hookTimer);
+    m_hookTimer = nullptr;
+  }
 
   m_isOnComputer = m_isPrimary;
 }
@@ -248,6 +286,7 @@ void MSWindowsComputer::enter()
     nextMark();
 
     m_primaryKeyDownList.clear();
+    resetMouseHookCheck();
   } else {
     // Entering a secondary computer. Ensure that no screensaver is active
     // and that the computer is not in powersave mode.
@@ -286,10 +325,25 @@ void MSWindowsComputer::leave()
   // tell the key mapper about the keyboard layout
   m_keyState->setKeyLayout(m_keyLayout);
 
+  if (m_isPrimary) {
+    // for the log, should the mouse hook stop working while on the client
+    m_foregroundAtLeave = GetForegroundWindow();
+
+    // keep the cursor still until the warp below. motion passed on in between
+    // moves it off the windows hiding it, where it shows until the next
+    // motion warps it back, a few frames later if the switch is busy with
+    // the clipboard. keys still pass until relaying starts below.
+    m_hook.setMode(kHOOK_HOLD_CURSOR);
+  }
+
   // tell desk that we're leaving and tell it the keyboard layout
   m_desks->leave(m_keyLayout);
 
   if (m_isPrimary) {
+    // let it vanish at the edge it left by. warped first, it's drawn in the
+    // center until the hider window there takes it over.
+    m_desks->waitForHiddenCursor();
+
     LOG_VERBOSE("centering cursor on leave: %+d, %+d", m_xCenter, m_yCenter);
     warpCursor(m_xCenter, m_yCenter);
 
@@ -312,6 +366,7 @@ void MSWindowsComputer::leave()
         LOG_VERBOSE("key button %d is down before leaving to another computer", i);
       }
     }
+    resetMouseHookCheck();
   }
 
   // now off computer
@@ -519,6 +574,7 @@ void MSWindowsComputer::warpCursor(int32_t x, int32_t y)
 {
   // warp mouse
   warpCursorNoFlush(x, y);
+  resetMouseHookCheck();
 
   // remove all input events before and including warp
   MSG msg;
@@ -687,6 +743,11 @@ void MSWindowsComputer::getCursorCenter(int32_t &x, int32_t &y) const
 {
   x = m_xCenter;
   y = m_yCenter;
+}
+
+std::vector<deskflow::ShapeHole> MSWindowsComputer::getShapeHoles() const
+{
+  return m_shapeHoles;
 }
 
 void MSWindowsComputer::fakeMouseButton(ButtonID id, bool press)
@@ -893,12 +954,15 @@ bool MSWindowsComputer::onPreDispatchPrimary(HWND, UINT message, WPARAM wParam, 
     return onKey(wParam, lParam);
 
   case DESKFLOW_MSG_MOUSE_BUTTON:
+    ++m_hookMouseEvents;
     return onMouseButton(wParam, lParam);
 
   case DESKFLOW_MSG_MOUSE_MOVE:
+    ++m_hookMouseEvents;
     return onMouseMove(static_cast<int32_t>(wParam), static_cast<int32_t>(lParam));
 
   case DESKFLOW_MSG_MOUSE_WHEEL:
+    ++m_hookMouseEvents;
     return onMouseWheel(static_cast<int32_t>(lParam), static_cast<int32_t>(wParam));
 
   case DESKFLOW_MSG_PRE_WARP: {
@@ -1227,6 +1291,17 @@ bool MSWindowsComputer::onMouseButton(WPARAM wParam, LPARAM lParam)
 //   example)
 bool MSWindowsComputer::onMouseMove(int32_t mx, int32_t my)
 {
+  // the low level hook can report a position the cursor never actually
+  // reaches, e.g. inside a gap between monitors when pushing against an inner
+  // edge of an L-shaped arrangement (the hook itself only clamps onto the
+  // bounding box).  pull it back onto the nearest monitor so the server sees
+  // the cursor at the edge it was pushed against.
+  if (m_isPrimary && m_isOnComputer && !m_shapeHoles.empty()) {
+    const auto [cx, cy] = deskflow::clampToRegions(m_monitors, mx, my);
+    mx = static_cast<int32_t>(cx);
+    my = static_cast<int32_t>(cy);
+  }
+
   // compute motion delta (relative to the last known
   // mouse position)
   int32_t x = mx - m_xCursor;
@@ -1258,12 +1333,24 @@ bool MSWindowsComputer::onMouseMove(int32_t mx, int32_t my)
     // from the center of the computer to an edge then
     // it's probably a bogus motion that we want to
     // ignore (see warpCursorNoFlush() for a further
-    // description).
+    // description).  the cursor is parked at the center of the primary
+    // monitor, which sits at 0,0, so measure against that monitor rather
+    // than the whole desktop: when the primary monitor isn't centered in the
+    // desktop (e.g. an L-shaped arrangement), a stale position reported just
+    // after leaving can be far from the center yet still inside the desktop.
     static int32_t bogusZoneSize = 10;
-    if (-x + bogusZoneSize > m_xCenter - m_x || x + bogusZoneSize > m_x + m_w - m_xCenter ||
-        -y + bogusZoneSize > m_yCenter - m_y || y + bogusZoneSize > m_y + m_h - m_yCenter) {
+    if (-x + bogusZoneSize > m_xCenter || x + bogusZoneSize > m_wPrimary - m_xCenter ||
+        -y + bogusZoneSize > m_yCenter || y + bogusZoneSize > m_hPrimary - m_yCenter) {
 
       LOG_DEBUG("dropped bogus delta motion: %+d,%+d", x, y);
+
+      // don't measure the next motion from this position either. the hook
+      // can report a burst of positions from before the warp, each relative
+      // to where the cursor was rather than to the center, so measured from
+      // each other they come out as small motions in random directions. on
+      // entering a client at its very edge, any of those away from the edge
+      // switches straight back.
+      saveMousePosition(m_xCenter, m_yCenter);
     } else {
       // send motion
       sendEvent(EventTypes::PrimaryComputerMotionOnSecondary, MotionInfo::alloc(x, y));
@@ -1317,12 +1404,15 @@ bool MSWindowsComputer::onDisplayChange()
 {
   // computer resolution may have changed.  save old shape.
   int32_t xOld = m_x, yOld = m_y, wOld = m_w, hOld = m_h;
+  const auto shapeHolesOld = m_shapeHoles;
 
   // update shape
   updateComputerShape();
 
-  // do nothing if resolution hasn't changed
-  if (xOld != m_x || yOld != m_y || wOld != m_w || hOld != m_h) {
+  // do nothing if neither the resolution nor the monitor arrangement changed
+  // (monitors can move around inside the same bounding box)
+  if (xOld != m_x || yOld != m_y || wOld != m_w || hOld != m_h || shapeHolesOld != m_shapeHoles) {
+    resetMouseHookCheck();
     if (m_isPrimary) {
       if (!m_isOnComputer) {
         LOG_VERBOSE("centering cursor on display change: %+d, %+d", m_xCenter, m_yCenter);
@@ -1347,14 +1437,15 @@ bool MSWindowsComputer::onDisplayChange()
 void MSWindowsComputer::onClipboardChange()
 {
   // now notify client that somebody changed the clipboard (unless
-  // we're the owner).
+  // we're the owner).  report every change, not just the one that took
+  // ownership from us: the server keeps the sequence number of the last
+  // grab it saw, and an unreported change leaves it old enough for a
+  // stale grab from another computer to win and empty this clipboard.
   if (!MSWindowsClipboard::isOwnedByDeskflow()) {
-    if (m_ownClipboard) {
-      LOG_DEBUG("clipboard changed: lost ownership");
-      m_ownClipboard = false;
-      sendClipboardEvent(EventTypes::ClipboardGrabbed, kClipboardClipboard);
-      sendClipboardEvent(EventTypes::ClipboardGrabbed, kClipboardSelection);
-    }
+    LOG_DEBUG("clipboard changed: %s", m_ownClipboard ? "lost ownership" : "changed again");
+    m_ownClipboard = false;
+    sendClipboardEvent(EventTypes::ClipboardGrabbed, kClipboardClipboard);
+    sendClipboardEvent(EventTypes::ClipboardGrabbed, kClipboardSelection);
   } else if (!m_ownClipboard) {
     LOG_DEBUG("clipboard changed: %s owned", kAppId);
     m_ownClipboard = true;
@@ -1435,11 +1526,48 @@ void MSWindowsComputer::updateComputerShape()
   m_h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
   m_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
   m_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
-  m_xCenter = GetSystemMetrics(SM_CXSCREEN) >> 1;
-  m_yCenter = GetSystemMetrics(SM_CYSCREEN) >> 1;
+  m_wPrimary = GetSystemMetrics(SM_CXSCREEN);
+  m_hPrimary = GetSystemMetrics(SM_CYSCREEN);
+  m_xCenter = m_wPrimary >> 1;
+  m_yCenter = m_hPrimary >> 1;
 
   // check for multiple monitors
   m_multimon = (m_w != GetSystemMetrics(SM_CXSCREEN) || m_h != GetSystemMetrics(SM_CYSCREEN));
+
+  // find any gaps the monitors leave in the virtual desktop, e.g. the
+  // missing corner of an L-shaped arrangement, so a client can fill them
+  std::vector<deskflow::Rect> monitors;
+  EnumDisplayMonitors(
+      nullptr, nullptr,
+      [](HMONITOR, HDC, LPRECT rect, LPARAM data) -> BOOL {
+        auto *list = reinterpret_cast<std::vector<deskflow::Rect> *>(data);
+        list->push_back({rect->left, rect->top, rect->right - rect->left, rect->bottom - rect->top});
+        return TRUE;
+      },
+      reinterpret_cast<LPARAM>(&monitors)
+  );
+  for (const auto &monitor : monitors) {
+    LOG_DEBUG(
+        "monitor: %dx%d@%d,%d", static_cast<int32_t>(monitor.w), static_cast<int32_t>(monitor.h),
+        static_cast<int32_t>(monitor.x), static_cast<int32_t>(monitor.y)
+    );
+  }
+
+  const auto shapeHoles = deskflow::findShapeHoles(monitors, {m_x, m_y, m_w, m_h});
+  if (shapeHoles != m_shapeHoles) {
+    if (shapeHoles.empty()) {
+      LOG_INFO("monitor layout has no shape holes (it's a plain rectangle)");
+    } else {
+      for (const auto &hole : shapeHoles) {
+        LOG_INFO(
+            "monitor layout has a %s hole: %dx%d@%d,%d", hole.location.c_str(), static_cast<int32_t>(hole.rect.w),
+            static_cast<int32_t>(hole.rect.h), static_cast<int32_t>(hole.rect.x), static_cast<int32_t>(hole.rect.y)
+        );
+      }
+    }
+  }
+  m_monitors = std::move(monitors);
+  m_shapeHoles = shapeHoles;
 
   // tell the desks
   m_desks->setShape(m_x, m_y, m_w, m_h, m_xCenter, m_yCenter, m_multimon);
@@ -1453,6 +1581,70 @@ void MSWindowsComputer::handleFixes()
   // update keys if keyboard layouts have changed
   if (m_keyState->didGroupsChange()) {
     updateKeys();
+  }
+}
+
+void MSWindowsComputer::resetMouseHookCheck()
+{
+  m_hookCheckBaseline = true;
+}
+
+// Windows calls the low level hooks on the desk thread, which also hands the
+// foreground window around when switching. if that thread stalls past
+// LowLevelHooksTimeout, e.g. while a fullscreen game being alt-tabbed is slow
+// to give up the foreground, Windows silently removes the hook that timed
+// out. that's usually the mouse hook, which sees far more events, so the keys
+// still go to the client while the mouse moves this computer's cursor. a
+// later hook from another program that doesn't call the next one hides the
+// mouse from us the same way. there's no notification for either, so watch
+// for the cursor moving without the hook having seen any mouse input.
+void MSWindowsComputer::checkMouseHook()
+{
+  int32_t x = 0;
+  int32_t y = 0;
+  m_desks->getCursorPos(x, y);
+  const bool hookSawMouse = m_hookMouseEvents != m_hookMouseEventsChecked;
+  m_hookMouseEventsChecked = m_hookMouseEvents;
+
+  bool lost = false;
+  if (m_hookCheckBaseline) {
+    m_hookCheckBaseline = false;
+  } else if (m_isOnComputer) {
+    lost = !hookSawMouse && (x != m_hookCheckX || y != m_hookCheckY);
+  } else {
+    // the hook eats all motion while on a client, so the cursor stays where
+    // leave() parked it
+    constexpr int32_t slack = 2;
+    lost = !hookSawMouse && (std::abs(x - m_xCenter) > slack || std::abs(y - m_yCenter) > slack);
+  }
+  m_hookCheckX = x;
+  m_hookCheckY = y;
+  if (!lost || !m_desks->reinstallMouseHook()) {
+    return;
+  }
+
+  ++m_hookLosses;
+  if (const double now = ARCH->time(); now - m_hookLossLoggedAt >= 10.0) {
+    const auto front = foregroundProcessName(m_isOnComputer ? GetForegroundWindow() : m_foregroundAtLeave);
+    if (m_isOnComputer) {
+      LOG_INFO("the mouse hook stopped seeing the mouse (in front: %s); reinstalled it", front.c_str());
+    } else {
+      LOG_INFO(
+          "the mouse hook stopped seeing the mouse while on a client, so it moved this computer's cursor (in front "
+          "when leaving: %s); reinstalled it",
+          front.c_str()
+      );
+    }
+    if (m_hookLosses > 1) {
+      LOG_INFO("the mouse hook was reinstalled %u times since the last report", m_hookLosses);
+    }
+    m_hookLossLoggedAt = now;
+    m_hookLosses = 0;
+  }
+
+  if (!m_isOnComputer) {
+    // the motion that got through took the cursor off the windows hiding it
+    warpCursor(m_xCenter, m_yCenter);
   }
 }
 

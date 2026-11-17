@@ -88,6 +88,7 @@ private:
   ISocketFactory *getSocketFactory() const;
   NetworkAddress &getCurrentServerAddress();
   void tryNextServer();
+  void logConnectionFailure(const QString &message) const;
 
   bool m_suspended = false;
   Client *m_client = nullptr;

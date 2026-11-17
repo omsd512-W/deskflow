@@ -21,6 +21,7 @@
 #include "platform/MSWindowsComputer.h"
 #include "platform/MSWindowsHook.h"
 
+#include <chrono>
 #include <malloc.h>
 
 // these are only defined when WINVER >= 0x0500
@@ -80,6 +81,8 @@
 #define DESKFLOW_MSG_FAKE_REL_MOVE DESKFLOW_HOOK_LAST_MSG + 11
 // enable; <unused>
 #define DESKFLOW_MSG_FAKE_INPUT DESKFLOW_HOOK_LAST_MSG + 12
+// bool* reinstalled; <unused>
+#define DESKFLOW_MSG_REINSTALL_MOUSE_HOOK DESKFLOW_HOOK_LAST_MSG + 13
 
 static void send_keyboard_input(WORD wVk, WORD wScan, DWORD dwFlags)
 {
@@ -178,6 +181,30 @@ void MSWindowsDesks::leave(HKL keyLayout)
   sendMessage(DESKFLOW_MSG_LEAVE, (WPARAM)keyLayout, 0);
 }
 
+void MSWindowsDesks::waitForHiddenCursor() const
+{
+  if (m_activeDesk == nullptr || m_activeDesk->m_window == nullptr) {
+    return;
+  }
+
+  // the system takes a millisecond or two to hand the cursor over to the
+  // hider windows. don't hold up the switch for long if it never does, e.g.
+  // under a topmost window.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(20);
+  for (;;) {
+    CURSORINFO info{};
+    info.cbSize = sizeof(info);
+    if (!GetCursorInfo(&info) || (info.flags & CURSOR_SHOWING) == 0 || info.hCursor == m_cursor) {
+      return;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      LOG_DEBUG("cursor still showing after leaving");
+      return;
+    }
+    SwitchToThread();
+  }
+}
+
 void MSWindowsDesks::resetOptions()
 {
   m_leaveForegroundOption = false;
@@ -233,6 +260,13 @@ void MSWindowsDesks::fakeInputBegin()
 void MSWindowsDesks::fakeInputEnd()
 {
   sendMessage(DESKFLOW_MSG_FAKE_INPUT, 0, 0);
+}
+
+bool MSWindowsDesks::reinstallMouseHook()
+{
+  bool reinstalled = false;
+  sendMessage(DESKFLOW_MSG_REINSTALL_MOUSE_HOOK, reinterpret_cast<WPARAM>(&reinstalled), 0);
+  return reinstalled;
 }
 
 void MSWindowsDesks::getCursorPos(int32_t &x, int32_t &y) const
@@ -533,16 +567,20 @@ void setCursorVisibility(bool visible)
 
 void MSWindowsDesks::deskEnter(Desk *desk)
 {
-  if (!m_isPrimary) {
-    ReleaseCapture();
-    if (m_relativeMouseMoves) {
-      restoreRelativeCursorPosition(desk);
-    }
+  // the primary captures the mouse on leave too, see deskLeave()
+  ReleaseCapture();
+  if (!m_isPrimary && m_relativeMouseMoves) {
+    restoreRelativeCursorPosition(desk);
   }
 
   setCursorVisibility(true);
 
   SetWindowPos(desk->m_window, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_HIDEWINDOW);
+  if (desk->m_edgeWindow != nullptr) {
+    SetWindowPos(
+        desk->m_edgeWindow, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_HIDEWINDOW
+    );
+  }
 
   // restore the foreground window
   // XXX -- this raises the window to the top of the Z-order.  we
@@ -590,6 +628,15 @@ void MSWindowsDesks::deskLeave(Desk *desk, HKL keyLayout)
     }
     SetWindowPos(desk->m_window, HWND_TOP, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 
+    // and one under the cursor where it is now, so it's hidden there before
+    // it's warped to the center, see waitForHiddenCursor(). the hook holds
+    // the cursor still meanwhile. topmost so a taskbar along that edge
+    // doesn't cover it. deskEnter() puts it back at the bottom.
+    POINT pos;
+    if (desk->m_lowLevel && desk->m_edgeWindow != nullptr && GetCursorPos(&pos)) {
+      SetWindowPos(desk->m_edgeWindow, HWND_TOPMOST, pos.x, pos.y, 1, 1, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+
     // switch to requested keyboard layout
     ActivateKeyboardLayout(keyLayout, 0);
 
@@ -621,6 +668,15 @@ void MSWindowsDesks::deskLeave(Desk *desk, HKL keyLayout)
         SetForegroundWindow(desk->m_window);
         AttachThreadInput(thatThread, thisThread, FALSE);
       }
+
+      // also capture the mouse with the blank cursor, which hides it at once
+      // where the window could take the foreground. the hidden display count
+      // above only applies over this thread's windows. unlike the secondary
+      // below, don't wait here for it to be hidden: this thread runs the low
+      // level hooks, so blocking it stalls all mouse input. the main thread
+      // waits instead, see waitForHiddenCursor().
+      SetCapture(desk->m_window);
+      SetCursor(m_cursor);
     }
   } else {
     // move hider window under the cursor center, raise, and show it
@@ -654,6 +710,7 @@ void MSWindowsDesks::deskThread(const void *vdesk)
   Desk *desk = const_cast<Desk *>(static_cast<const Desk *>(vdesk));
   desk->m_threadID = GetCurrentThreadId();
   desk->m_window = nullptr;
+  desk->m_edgeWindow = nullptr;
   desk->m_foregroundWindow = nullptr;
   if (desk->m_desk != nullptr && SetThreadDesktop(desk->m_desk) != 0) {
     // create a message queue
@@ -663,6 +720,9 @@ void MSWindowsDesks::deskThread(const void *vdesk)
     try {
       desk->m_window = createWindow(m_deskClass, L"DeskflowDesk");
       LOG_DEBUG("desk %ls window is 0x%08x", desk->m_name.c_str(), desk->m_window);
+      if (m_isPrimary) {
+        desk->m_edgeWindow = createWindow(m_deskClass, L"DeskflowDeskEdge");
+      }
     } catch (...) {
       // ignore
       LOG_DEBUG("can't create desk window for %ls", desk->m_name.c_str());
@@ -780,6 +840,16 @@ void MSWindowsDesks::deskThread(const void *vdesk)
           DESKFLOW_HOOK_FAKE_INPUT_VIRTUAL_KEY, DESKFLOW_HOOK_FAKE_INPUT_SCANCODE, msg.wParam ? 0 : KEYEVENTF_KEYUP
       );
       break;
+
+    case DESKFLOW_MSG_REINSTALL_MOUSE_HOOK:
+      if (m_useHooks && desk->m_lowLevel) {
+        const bool reinstalled = MSWindowsHook::reinstallMouseHook();
+        if (!reinstalled) {
+          LOG_WARN("failed to reinstall the mouse hook, error: %lu", GetLastError());
+        }
+        *reinterpret_cast<bool *>(msg.wParam) = reinstalled;
+      }
+      break;
     }
 
     // notify that message was processed
@@ -792,6 +862,9 @@ void MSWindowsDesks::deskThread(const void *vdesk)
   deskEnter(desk);
   if (desk->m_window != nullptr) {
     DestroyWindow(desk->m_window);
+  }
+  if (desk->m_edgeWindow != nullptr) {
+    DestroyWindow(desk->m_edgeWindow);
   }
   if (desk->m_desk != nullptr) {
     closeDesktop(desk->m_desk);

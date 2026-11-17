@@ -29,7 +29,9 @@ private Q_SLOTS:
   void getNonEmptyText();
   void isOwnedByDeskflow();
   void normalisesMalformedMacBitmap();
-  void preservesHealthyMacV5Bitmap();
+  void normalisesMacV5Bitmap();
+  void normalisesOtherColourMasks();
+  void keepsCanonicalBitmap();
 
 private:
   Log m_log;

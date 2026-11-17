@@ -47,6 +47,7 @@ static const OptionID kOptionModifierMapForSuper = OPTION_CODE("MMFR");
 static const OptionID kOptionHeartbeat = OPTION_CODE("HART");
 static const OptionID kOptionComputerSwitchCorners = OPTION_CODE("SSCM");
 static const OptionID kOptionComputerSwitchCornerSize = OPTION_CODE("SSCS");
+static const OptionID kOptionComputerMouseSpeed = OPTION_CODE("SMSP"); // percent
 static const OptionID kOptionComputerSwitchDelay = OPTION_CODE("SSWT");
 static const OptionID kOptionComputerSwitchTwoTap = OPTION_CODE("SSTT");
 static const OptionID kOptionXTestXineramaUnaware = OPTION_CODE("XTXU");
