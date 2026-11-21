@@ -23,6 +23,8 @@
 namespace {
 std::function<bool()> s_shouldQuit;
 IMP s_originalShouldTerminate = nullptr;
+std::function<void()> s_onReopen;
+IMP s_originalShouldHandleReopen = nullptr;
 BOOL s_isSystemShuttingDown = NO;
 } // namespace
 
@@ -105,14 +107,20 @@ bool isOSXInterfaceStyleDark()
 
 void forceAppActive()
 {
-  [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
-  [[NSApplication sharedApplication] setActivationPolicy:NSApplicationActivationPolicyRegular];
+  NSApplication *app = [NSApplication sharedApplication];
+  if ([app activationPolicy] != NSApplicationActivationPolicyRegular) {
+    [app setActivationPolicy:NSApplicationActivationPolicyRegular];
+  }
+  [app activateIgnoringOtherApps:YES];
 }
 
 void macOSNativeHide()
 {
-  [NSApp hide:nil];
-  [[NSApplication sharedApplication] setActivationPolicy:NSApplicationActivationPolicyAccessory];
+  NSApplication *app = [NSApplication sharedApplication];
+  [app hide:nil];
+  if ([app activationPolicy] != NSApplicationActivationPolicyAccessory) {
+    [app setActivationPolicy:NSApplicationActivationPolicyAccessory];
+  }
 }
 
 static NSApplicationTerminateReply deskflow_applicationShouldTerminate(id self, SEL _cmd, NSApplication *sender)
@@ -154,4 +162,34 @@ void installQuitHandler(std::function<bool()> shouldQuit)
                                                                 Q_UNUSED(note)
                                                                 s_isSystemShuttingDown = YES;
                                                               }];
+}
+
+static BOOL deskflow_applicationShouldHandleReopen(id self, SEL _cmd, NSApplication *sender, BOOL flag)
+{
+  if (s_onReopen) {
+    s_onReopen();
+  }
+
+  if (s_originalShouldHandleReopen) {
+    using ShouldHandleReopenFn = BOOL (*)(id, SEL, NSApplication *, BOOL);
+    return reinterpret_cast<ShouldHandleReopenFn>(s_originalShouldHandleReopen)(self, _cmd, sender, flag);
+  }
+
+  return YES;
+}
+
+void installReopenHandler(std::function<void()> onReopen)
+{
+  s_onReopen = std::move(onReopen);
+
+  Class cls = [[NSApp delegate] class];
+  SEL selector = @selector(applicationShouldHandleReopen:hasVisibleWindows:);
+
+  Method method = class_getInstanceMethod(cls, selector);
+  if (method) {
+    s_originalShouldHandleReopen = method_getImplementation(method);
+    method_setImplementation(method, (IMP)deskflow_applicationShouldHandleReopen);
+  } else {
+    class_addMethod(cls, selector, (IMP)deskflow_applicationShouldHandleReopen, "B@:@B");
+  }
 }

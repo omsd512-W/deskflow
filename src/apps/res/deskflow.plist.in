@@ -33,6 +33,12 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 
+	<!-- Start as an agent so helper binaries in Contents/MacOS/ (e.g. deskflow-core)
+	     and hidden-on-start GUI launches never check in as foreground apps and spawn
+	     duplicate Dock icons. The GUI switches to Regular when its window is shown. -->
+	<key>LSUIElement</key>
+	<true/>
+
 	<!-- Prevent macOS from terminating during memory pressure -->
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>

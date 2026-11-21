@@ -17,3 +17,4 @@ bool isOSXInterfaceStyleDark();
 void forceAppActive();
 void macOSNativeHide();
 void installQuitHandler(std::function<bool()> shouldQuit);
+void installReopenHandler(std::function<void()> onReopen);

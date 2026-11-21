@@ -71,6 +71,10 @@ int main(int argc, char **argv)
 {
 #if defined(Q_OS_WIN)
   ArchMiscWindows::setInstanceWin32(GetModuleHandle(nullptr));
+#elif defined(Q_OS_MACOS)
+  // Keep Qt from promoting deskflow-core to a foreground app with a Dock icon
+  // when launched outside an LSUIElement bundle.
+  qputenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM", "1");
 #endif
 
   QApplication::setApplicationName(QStringLiteral("%1 Core").arg(kAppName));
