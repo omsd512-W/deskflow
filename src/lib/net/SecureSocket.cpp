@@ -29,7 +29,6 @@
 //
 // SecureSocket
 //
-static const std::size_t s_maxInputBufferSize = 1024 * 1024;
 
 static const float s_retryDelay = 0.01f;
 
@@ -138,13 +137,14 @@ TCPSocket::JobResult SecureSocket::doRead()
   if (bytesRead > 0) {
     bool wasEmpty = (m_inputBuffer.getSize() == 0);
 
-    // slurp up as much as possible
+    // read until SSL_read() wants more data from the socket. stopping early,
+    // as TCPSocket does once its input buffer is large, is not safe here: the
+    // last SSL_read() may have been served from OpenSSL's own buffer without
+    // a recv(). on Windows a reported FD_READ is not raised again until
+    // recv() is called, so the socket would never poll readable again, and
+    // decrypted bytes left inside OpenSSL are invisible to poll() anyway.
     do {
       m_inputBuffer.write(buffer, bytesRead);
-
-      if (m_inputBuffer.getSize() > s_maxInputBufferSize) {
-        break;
-      }
 
       status = secureRead(buffer, bufferSize, bytesRead);
       if (status < 0) {
